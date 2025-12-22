@@ -5,11 +5,12 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence
 
 import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
+from rich.prompt import Confirm, IntPrompt, Prompt
 
 from . import __version__
 from . import audio, asr, io, romanizer, subtitles, translation, video
@@ -151,6 +152,165 @@ def burn(
         fonts_dir=fonts_dir,
     )
     console.print(f"Burned file at {result}")
+
+
+def _parse_languages(raw_value: str) -> list[str]:
+    langs = [lang.strip() for lang in raw_value.split(",") if lang.strip()]
+    if not langs:
+        raise typer.BadParameter("At least one target language is required")
+    return langs
+
+
+def _default_workdir(input_path: Path) -> Path:
+    return Path("workdir") / input_path.stem
+
+
+def _wizard_impl():
+    console.print("[bold]jp2subs Wizard[/bold] — interactive guided run\n")
+    input_raw = Prompt.ask("Input media/audio path")
+    input_path = Path(input_raw).expanduser()
+    if not input_path.exists():
+        console.print(f"[red]Input path not found:[/red] {input_path}")
+        raise typer.Exit(code=1)
+
+    workdir_default = _default_workdir(input_path)
+    workdir = Path(Prompt.ask("Work directory", default=str(workdir_default))).expanduser()
+
+    mono = Confirm.ask("Extract mono audio?", default=False)
+    model_size = Prompt.ask("Transcription model size", default="large-v3")
+    beam_size = IntPrompt.ask("Beam size", default=5)
+    vad_filter = Confirm.ask("Enable VAD filtering?", default=True)
+
+    generate_romaji = Confirm.ask("Generate romaji transcript?", default=False)
+
+    langs_raw = Prompt.ask("Translation target languages (comma-separated, e.g., en, pt-BR)")
+    try:
+        target_langs = _parse_languages(langs_raw)
+    except typer.BadParameter as exc:  # pragma: no cover - handled in tests via invoke
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    translation_mode = Prompt.ask("Translation mode", choices=["llm", "draft+postedit"], default="llm")
+    provider = Prompt.ask("Translation provider", choices=["local", "api"], default="local")
+    fmt = Prompt.ask("Subtitle format", choices=["srt", "vtt", "ass"], default="srt")
+    bilingual = Prompt.ask("Bilingual secondary language (optional, e.g., ja)", default="") or None
+    output_mode = Prompt.ask("Output type", choices=["subtitles", "mux-soft", "burn"], default="subtitles")
+
+    steps: list[tuple[str, Callable[..., object]]] = []
+    generated_paths: list[Path] = []
+
+    def stage_ingest() -> Path:
+        return audio.ingest_media(input_path, workdir, mono=mono)
+
+    def stage_transcribe(audio_path: Path) -> MasterDocument:
+        doc = asr.transcribe_audio(
+            audio_path,
+            model_size=model_size,
+            vad_filter=vad_filter,
+            temperature=0.0,
+            beam_size=beam_size,
+            device=None,
+        )
+        master_path = io.master_path_from_workdir(workdir)
+        io.save_master(doc, master_path)
+        _write_transcripts(doc, workdir, prefix="transcript_ja", lang="ja")
+        generated_paths.extend(
+            [master_path, workdir / "transcript_ja.txt", workdir / "transcript_ja.srt"]
+        )
+        return doc
+
+    def stage_romanize(doc: MasterDocument) -> MasterDocument:
+        doc = romanizer.romanize_segments(doc)
+        master_path = io.master_path_from_workdir(workdir)
+        io.save_master(doc, master_path)
+        _write_transcripts(doc, workdir, prefix="transcript_romaji", lang="ja", use_romaji=True)
+        generated_paths.extend([workdir / "transcript_romaji.txt", workdir / "transcript_romaji.srt"])
+        return doc
+
+    def stage_translate(doc: MasterDocument) -> MasterDocument:
+        doc = translation.translate_document(
+            doc, target_langs=target_langs, mode=translation_mode, provider=provider, block_size=20, glossary=None
+        )
+        master_path = io.master_path_from_workdir(workdir)
+        io.save_master(doc, master_path)
+        generated_paths.append(master_path)
+        return doc
+
+    def stage_export(doc: MasterDocument) -> list[Path]:
+        exports: list[Path] = []
+        for lang in target_langs:
+            output_path = workdir / f"subs_{lang}.{fmt}"
+            subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=bilingual)
+            exports.append(output_path)
+        generated_paths.extend(exports)
+        return exports
+
+    def stage_mux(subs_path: Path) -> Path:
+        if not audio.is_video(input_path):
+            raise typer.BadParameter("Muxing requires a video input")
+        out_path = workdir / f"{input_path.stem}_soft.mkv"
+        return video.mux_soft(input_path, subs_path, out_path)
+
+    def stage_burn(subs_path: Path) -> Path:
+        if not audio.is_video(input_path):
+            raise typer.BadParameter("Burn-in requires a video input")
+        out_path = workdir / f"{input_path.stem}_hard.mp4"
+        return video.burn_subs(input_path, subs_path, out_path)
+
+    steps.append(("Ingest", stage_ingest))
+    steps.append(("Transcribe", stage_transcribe))
+    if generate_romaji:
+        steps.append(("Romanize", stage_romanize))
+    steps.append(("Translate", stage_translate))
+    steps.append(("Export", stage_export))
+
+    console.print("\nRunning pipeline...\n")
+    audio_path: Path | None = None
+    doc: MasterDocument | None = None
+    export_paths: list[Path] = []
+    with Progress(TextColumn("[bold blue]{task.description}"), BarColumn(), TaskProgressColumn(), expand=True) as progress:
+        task = progress.add_task("Processing", total=len(steps) + (1 if output_mode != "subtitles" else 0))
+
+        for label, handler in steps:
+            progress.update(task, description=label)
+            if label == "Ingest":
+                audio_path = handler()
+            elif label == "Transcribe":
+                doc = handler(audio_path)  # type: ignore[arg-type]
+            elif label in {"Romanize", "Translate"}:
+                doc = handler(doc)  # type: ignore[arg-type]
+            elif label == "Export":
+                export_paths = handler(doc)  # type: ignore[arg-type]
+            progress.advance(task)
+
+        if output_mode == "mux-soft":
+            progress.update(task, description="Mux (soft)")
+            muxed = stage_mux(export_paths[0])
+            generated_paths.append(muxed)
+            progress.advance(task)
+        elif output_mode == "burn":
+            progress.update(task, description="Burn (hard)")
+            burned = stage_burn(export_paths[0])
+            generated_paths.append(burned)
+            progress.advance(task)
+
+    console.print("\n[bold green]Wizard complete![/bold green]\nGenerated files:")
+    for path in generated_paths:
+        console.print(f"- {path}")
+
+
+@app.command(name="wizard")
+def wizard_cmd():
+    """Run the interactive jp2subs wizard."""
+
+    _wizard_impl()
+
+
+@app.command(name="menu")
+def menu_cmd():
+    """Alias for the interactive wizard."""
+
+    _wizard_impl()
 
 
 @app.command()
