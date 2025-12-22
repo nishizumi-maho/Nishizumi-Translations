@@ -70,8 +70,6 @@ class PipelineTab(BaseWidget):
         self.vad_check = QtWidgets.QCheckBox("VAD")
         self.vad_check.setChecked(True)
         self.mono_check = QtWidgets.QCheckBox("Mono")
-        self.lang_edit = QtWidgets.QLineEdit("en")
-        self.bilingual_edit = QtWidgets.QLineEdit()
         self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
         self.fmt_combo = QtWidgets.QComboBox()
         self.fmt_combo.addItems(["srt", "vtt", "ass"])
@@ -79,8 +77,11 @@ class PipelineTab(BaseWidget):
         form.addRow("Beam size", self.beam_slider)
         form.addRow("Voice activity detection", self.vad_check)
         form.addRow("Force mono", self.mono_check)
-        form.addRow("Languages (comma-separated)", self.lang_edit)
-        form.addRow("Bilingual secondary", self.bilingual_edit)
+        notice = QtWidgets.QLabel(
+            "Translation is disabled. Use a local LLM, DeepL, or ChatGPT to translate transcripts manually."
+        )
+        notice.setWordWrap(True)
+        form.addRow("Translation", notice)
         form.addRow("Generate romaji", self.romaji_check)
         form.addRow("Subtitle format", self.fmt_combo)
 
@@ -258,8 +259,6 @@ class PipelineTab(BaseWidget):
         job.vad = self.vad_check.isChecked()
         job.mono = self.mono_check.isChecked()
         job.generate_romaji = self.romaji_check.isChecked()
-        job.languages = [lang.strip() for lang in self.lang_edit.text().split(",") if lang.strip()]
-        job.bilingual = self.bilingual_edit.text() or None
         job.fmt = self.fmt_combo.currentText()
         job.best_of = self.best_of_spin.value() or None
         job.patience = self.patience_spin.value() or None
@@ -404,37 +403,11 @@ class SettingsTab(BaseWidget):
         form.addRow("VAD", self.vad_check)
         form.addRow("Force mono", self.mono_check)
         form.addRow("Subtitle format", self.subtitle_fmt_combo)
-
-        self.provider_combo = QtWidgets.QComboBox()
-        self.provider_combo.addItems(["local", "api"])
-        idx = self.provider_combo.findText(self.cfg.translation.provider)
-        if idx >= 0:
-            self.provider_combo.setCurrentIndex(idx)
-        self.mode_combo = QtWidgets.QComboBox()
-        self.mode_combo.addItems(["llm", "draft+postedit"])
-        idx = self.mode_combo.findText(self.cfg.translation.mode)
-        if idx >= 0:
-            self.mode_combo.setCurrentIndex(idx)
-        self.api_url_edit = QtWidgets.QLineEdit(self.cfg.translation.api_url or "")
-        self.api_key_edit = QtWidgets.QLineEdit(self.cfg.translation.api_key or "")
-        self.llama_bin_edit = QtWidgets.QLineEdit(self.cfg.translation.llama_binary or "")
-        llama_bin_btn = QtWidgets.QPushButton("Browse")
-        llama_bin_btn.clicked.connect(lambda: self._pick_file(self.llama_bin_edit))
-        bin_row = QtWidgets.QHBoxLayout()
-        bin_row.addWidget(self.llama_bin_edit)
-        bin_row.addWidget(llama_bin_btn)
-        self.llama_model_edit = QtWidgets.QLineEdit(self.cfg.translation.llama_model or "")
-        llama_model_btn = QtWidgets.QPushButton("Browse")
-        llama_model_btn.clicked.connect(lambda: self._pick_file(self.llama_model_edit))
-        model_row = QtWidgets.QHBoxLayout()
-        model_row.addWidget(self.llama_model_edit)
-        model_row.addWidget(llama_model_btn)
-        form.addRow("Translation provider", self.provider_combo)
-        form.addRow("Mode", self.mode_combo)
-        form.addRow("API URL", self.api_url_edit)
-        form.addRow("API key", self.api_key_edit)
-        form.addRow("llama binary", bin_row)
-        form.addRow("llama model", model_row)
+        translation_notice = QtWidgets.QLabel(
+            "Translation settings were removed. Use an external service like DeepL, ChatGPT, or a local LLM to translate transcripts."
+        )
+        translation_notice.setWordWrap(True)
+        form.addRow("Translation", translation_notice)
 
         btn_row = QtWidgets.QHBoxLayout()
         save_btn = QtWidgets.QPushButton("Save")
@@ -459,11 +432,6 @@ class SettingsTab(BaseWidget):
         if path:
             self.ffmpeg_edit.setText(path)
 
-    def _pick_file(self, target: QtWidgets.QLineEdit):  # pragma: no cover - GUI
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select file")
-        if path:
-            target.setText(path)
-
     def _save(self):
         self.cfg.ffmpeg_path = self.ffmpeg_edit.text() or None
         self.cfg.defaults.model_size = self.model_size_edit.text() or "large-v3"
@@ -471,12 +439,6 @@ class SettingsTab(BaseWidget):
         self.cfg.defaults.vad = self.vad_check.isChecked()
         self.cfg.defaults.mono = self.mono_check.isChecked()
         self.cfg.defaults.subtitle_format = self.subtitle_fmt_combo.currentText()
-        self.cfg.translation.provider = self.provider_combo.currentText()
-        self.cfg.translation.mode = self.mode_combo.currentText()
-        self.cfg.translation.api_url = self.api_url_edit.text() or None
-        self.cfg.translation.api_key = self.api_key_edit.text() or None
-        self.cfg.translation.llama_binary = self.llama_bin_edit.text() or None
-        self.cfg.translation.llama_model = self.llama_model_edit.text() or None
         persist_app_state(self.cfg)
 
     def _load(self):
@@ -503,16 +465,6 @@ class SettingsTab(BaseWidget):
         idx = self.subtitle_fmt_combo.findText(self.cfg.defaults.subtitle_format)
         if idx >= 0:
             self.subtitle_fmt_combo.setCurrentIndex(idx)
-        idx = self.provider_combo.findText(self.cfg.translation.provider)
-        if idx >= 0:
-            self.provider_combo.setCurrentIndex(idx)
-        idx = self.mode_combo.findText(self.cfg.translation.mode)
-        if idx >= 0:
-            self.mode_combo.setCurrentIndex(idx)
-        self.api_url_edit.setText(self.cfg.translation.api_url or "")
-        self.api_key_edit.setText(self.cfg.translation.api_key or "")
-        self.llama_bin_edit.setText(self.cfg.translation.llama_binary or "")
-        self.llama_model_edit.setText(self.cfg.translation.llama_model or "")
 
 
 class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignore[misc]
@@ -532,7 +484,6 @@ STAGES = [
     "Ingest",
     "Transcribe",
     "Romanize",
-    "Translate",
     "Export",
     "Finalize",
 ]

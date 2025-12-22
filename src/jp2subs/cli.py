@@ -16,12 +16,12 @@ from . import config, deps
 from .paths import coerce_workdir, default_workdir_for_input, normalize_input_path, strip_quotes
 
 from . import __version__
-from . import audio, asr, io, romanizer, subtitles, translation, video
+from . import audio, asr, io, romanizer, subtitles, video
 from .models import MasterDocument
 
-BATCH_STAGES: Sequence[str] = ("ingest", "transcribe", "romanize", "translate", "export")
+BATCH_STAGES: Sequence[str] = ("ingest", "transcribe", "romanize", "export")
 
-app = typer.Typer(add_completion=False, help="jp2subs: end-to-end JP transcription, translation, and subtitling")
+app = typer.Typer(add_completion=False, help="jp2subs: end-to-end JP transcription and subtitling")
 deps_app = typer.Typer(add_completion=False, help="Manage optional jp2subs dependencies")
 
 app.add_typer(deps_app, name="deps")
@@ -118,39 +118,20 @@ def romanize(master: Path, workdir: Path = typer.Option(Path("workdir"))):
 
 
 @app.command()
-def translate(
-    master: Path,
-    to: List[str] = typer.Option(..., help="Destination language codes e.g. en"),
-    mode: str = typer.Option("llm", case_sensitive=False),
-    provider: str = typer.Option("echo", help="Translation provider: echo|local|api"),
-    block_size: int = 20,
-    glossary: Optional[Path] = typer.Option(None, help="Optional glossary JSON mapping source->target"),
-):
-    """Translate segments to the requested languages."""
+def translate(master: Path):
+    """Legacy translation command (disabled)."""
 
-    cfg = _summarize_config()
-    cfg.translation.provider = provider
-    ok, reason = translation.is_translation_available(cfg)
-    if not ok:
-        raise typer.BadParameter(
-            f"Translation is not configured; {reason} Configure llama binary + GGUF model or API URL."
-        )
-
-    doc = io.load_master(master)
-    glossary_data = json.loads(glossary.read_text(encoding="utf-8")) if glossary else None
-    doc = translation.translate_document(
-        doc, target_langs=to, mode=mode, provider=provider, block_size=block_size, glossary=glossary_data
+    raise typer.BadParameter(
+        "Translation support has been removed from jp2subs. Use a local LLM, DeepL, or a chatbot like ChatGPT "
+        "to translate your transcripts instead."
     )
-    io.save_master(doc, master)
-    console.print(f"Translations added to {master}")
 
 
 @app.command()
 def export(
     master: Path,
     fmt: str = typer.Option("srt", help="Subtitle format: srt|vtt|ass"),
-    lang: str = typer.Option("en", help="Primary language code"),
-    bilingual: Optional[str] = typer.Option(None, help="Secondary language code e.g. ja"),
+    lang: str = typer.Option("ja", help="Primary language code"),
     out: Optional[Path] = typer.Option(None, help="Output path; defaults to workdir/subs_<lang>.<fmt>"),
     workdir: Path = typer.Option(Path("workdir")),
 ):
@@ -158,7 +139,7 @@ def export(
 
     doc = io.load_master(master)
     output_path = out or (Path(workdir) / f"subs_{lang}.{fmt}")
-    subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=bilingual)
+    subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=None)
     console.print(f"Subtitle written to [bold]{output_path}[/bold]")
 
 
@@ -287,20 +268,6 @@ def burn(
     console.print(f"Burned file at {result}")
 
 
-def _parse_languages(raw_value: str) -> list[str]:
-    langs = [lang.strip() for lang in raw_value.split(",") if lang.strip()]
-    if not langs:
-        raise typer.BadParameter("At least one target language is required")
-    return langs
-
-
-def _parse_optional_languages(raw_value: str) -> list[str]:
-    """Allow empty input to skip translation."""
-
-    langs = [lang.strip() for lang in raw_value.split(",") if lang.strip()]
-    return langs
-
-
 def _prompt_choice(label: str, options: dict[str, str], default: str) -> str:
     rendered = " ".join([f"[{key}] {value}" for key, value in options.items()])
     prompt_text = f"{label} {rendered} (default {default})"
@@ -380,28 +347,12 @@ def _wizard_impl():
 
     romaji_choice = _prompt_choice("Generate romaji?", {"y": "yes", "n": "no"}, "n")
     generate_romaji = romaji_choice == "y"
-
-    langs_raw = Prompt.ask(
-        "Translation target languages (comma-separated, e.g., en). Leave blank for Japanese-only transcript",
-        default=",",
+    console.print(
+        "[yellow]Translation and bilingual exports are no longer built in. Use a local LLM, DeepL, or ChatGPT to translate "
+        "the generated transcripts if needed.[/yellow]"
     )
-    target_langs = _parse_optional_languages(langs_raw)
-
-    translation_mode = cfg.translation.mode
-    provider = cfg.translation.provider
-    if target_langs:
-        translation_mode = Prompt.ask("Translation mode", choices=["llm", "draft+postedit"], default=cfg.translation.mode)
-        provider = Prompt.ask("Translation provider", choices=["local", "api"], default=cfg.translation.provider)
-        cfg.translation.provider = provider
-        ok, reason = translation.is_translation_available(cfg)
-        if not ok:
-            console.print(
-                f"[yellow]Translation is not configured; continuing with transcription only. ({reason})[/yellow]"
-            )
-            target_langs = []
     fmt_choice = _prompt_choice("Subtitle format", {"1": "srt", "2": "vtt", "3": "ass"}, "1")
     fmt = {"1": "srt", "2": "vtt", "3": "ass"}[fmt_choice]
-    bilingual = Prompt.ask("Bilingual secondary language (optional, e.g., ja)", default="") or None
     output_choice = _prompt_choice(
         "Output type", {"1": "subtitles", "2": "mux-soft", "3": "burn"}, "1"
     )
@@ -438,22 +389,11 @@ def _wizard_impl():
         generated_paths.extend([workdir / "transcript_romaji.txt", workdir / "transcript_romaji.srt"])
         return doc
 
-    def stage_translate(doc: MasterDocument) -> MasterDocument:
-        doc = translation.translate_document(
-            doc, target_langs=target_langs, mode=translation_mode, provider=provider, block_size=20, glossary=None
-        )
-        master_path = io.master_path_from_workdir(workdir)
-        io.save_master(doc, master_path)
-        generated_paths.append(master_path)
-        return doc
-
     def stage_export(doc: MasterDocument) -> list[Path]:
         exports: list[Path] = []
-        export_langs = target_langs or ["ja"]
-        for lang in export_langs:
-            output_path = workdir / f"subs_{lang}.{fmt}"
-            subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=bilingual)
-            exports.append(output_path)
+        output_path = workdir / f"subs_ja.{fmt}"
+        subtitles.write_subtitles(doc, output_path, fmt, lang="ja", secondary=None)
+        exports.append(output_path)
         generated_paths.extend(exports)
         return exports
 
@@ -473,8 +413,6 @@ def _wizard_impl():
     steps.append(("Transcribe", stage_transcribe))
     if generate_romaji:
         steps.append(("Romanize", stage_romanize))
-    if target_langs:
-        steps.append(("Translate", stage_translate))
     steps.append(("Export", stage_export))
 
     console.print("\nRunning pipeline...\n")
@@ -598,20 +536,14 @@ def ui_cmd():
 @app.command()
 def batch(
     input_dir: Path,
-    to: List[str] = typer.Option(..., help="Destination language codes e.g. en"),
     ext: str = typer.Option("mp4,mkv,flac", help="Comma-separated list of extensions to process"),
     workdir: Path = typer.Option(Path("workdir")),
-    mode: str = typer.Option("llm", case_sensitive=False),
-    provider: str = typer.Option("echo", help="Translation provider: echo|local|api"),
-    block_size: int = 20,
-    glossary: Optional[Path] = typer.Option(None, help="Optional glossary JSON mapping source->target"),
     model_size: str = "large-v3",
     device: Optional[str] = None,
     vad: bool = True,
     temperature: float = 0.0,
     beam_size: int = 5,
     fmt: str = typer.Option("srt", help="Subtitle format for export"),
-    bilingual: Optional[str] = typer.Option(None, help="Optional secondary subtitle language"),
     mono: bool = False,
     force: bool = typer.Option(False, help="Reprocess stages even when cached"),
 ):
@@ -623,8 +555,6 @@ def batch(
     if not media_files:
         console.print("No media files found matching the provided extensions.")
         raise typer.Exit(code=1)
-
-    glossary_data = json.loads(glossary.read_text(encoding="utf-8")) if glossary else None
 
     with Progress(
         TextColumn("[bold blue]{task.description}"),
@@ -666,21 +596,10 @@ def batch(
                     doc = romanizer.romanize_segments(doc)
                     io.save_master(doc, master_path)
                     _write_transcripts(doc, workdir_path, prefix="transcript_romaji", lang="ja", use_romaji=True)
-                elif stage == "translate":
-                    doc = doc or io.load_master(master_path)
-                    doc = translation.translate_document(
-                        doc,
-                        target_langs=to,
-                        mode=mode,
-                        provider=provider,
-                        block_size=block_size,
-                        glossary=glossary_data,
-                    )
-                    io.save_master(doc, master_path)
                 elif stage == "export":
                     doc = doc or io.load_master(master_path)
-                    output_path = workdir_path / f"subs_{to[0]}.{fmt}"
-                    subtitles.write_subtitles(doc, output_path, fmt, lang=to[0], secondary=bilingual)
+                    output_path = workdir_path / f"subs_ja.{fmt}"
+                    subtitles.write_subtitles(doc, output_path, fmt, lang="ja", secondary=None)
 
                 _mark_stage(workdir_path, stage)
                 progress.advance(stage_task)

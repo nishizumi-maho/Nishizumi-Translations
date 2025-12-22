@@ -1,15 +1,15 @@
 # jp2subs
 
-jp2subs is a Windows-friendly CLI/GUI tool that turns Japanese audio/video into high-fidelity multi-language subtitles. The pipeline covers ingestion, ASR (faster-whisper), romanization, LLM translation (or draft + post-edit), subtitle export (SRT/VTT/ASS), and mux/burn with ffmpeg.
+jp2subs is a Windows-friendly CLI/GUI tool that turns Japanese audio/video into high-fidelity transcripts and subtitles. The pipeline covers ingestion, ASR (faster-whisper), optional romanization, subtitle export (SRT/VTT/ASS), and mux/burn with ffmpeg. Translation used to be bundled but has been removed because maintaining it in the pipeline is too complex. Use a local LLM, DeepL, or a chatbot like ChatGPT to translate the generated transcripts if needed.
 
 ## Key features
 - Accepts videos (mp4/mkv/webm/etc.) and audio files (flac/mp3/wav/m4a/mka).
 - Extracts audio with ffmpeg (FLAC 48 kHz, stereo/mono configurable).
 - Transcription via `faster-whisper` (temperature=0, optional VAD, word timestamps when available).
-- Master JSON with segments `{id, start, end, ja_raw, romaji, translations{...}}`.
+- Master JSON with segments `{id, start, end, ja_raw, romaji}` for downstream tooling.
 - Romanization with `pykakasi`.
-- Pluggable translation: `llm` mode (local `llama.cpp` or generic API) and `draft+postedit` (NLLB draft + LLM post-edit).
-- Exports SRT/VTT/ASS, supports bilingual output (e.g., JP + EN). Line breaks at ~42 characters and max 2 lines.
+- Translation has been removed; bring your own tool (local LLM, DeepL, ChatGPT) if you need another language.
+- Exports SRT/VTT/ASS for Japanese transcripts. Line breaks at ~42 characters and max 2 lines.
 - Soft-mux to MKV and hard-burn via ffmpeg + libass.
 - Workdir caching; pipeline skips stages when `master.json` already exists.
 
@@ -28,11 +28,6 @@ pip install jp2subs[gui]     # PySide6 for the desktop interface
 
 Models:
 - **faster-whisper**: download a model (e.g., `large-v3`) and keep it in the default cache (~AppData/Local/whisper).
-- **llama.cpp**: run `jp2subs deps install-llama` (or `jp2subs install-llama`) to download the latest release to
-  `%APPDATA%\\jp2subs\\deps\\llama.cpp\\<tag>` and set `translation.llama_binary` in `%APPDATA%\\jp2subs\\config.toml`.
-  Point `translation.llama_model` (or `JP2SUBS_LLAMA_MODEL`) to your `model.gguf` file. Run `jp2subs deps install-model`
-  to download a recommended GGUF to `%APPDATA%\\jp2subs\\models` and update the config automatically.
-- **NLLB** (optional draft): use your preferred offline runner (hook provider manually or pre-process).
 
 ## Quickstart
 ```bash
@@ -45,66 +40,29 @@ jp2subs ingest input.mkv --workdir workdir
 # 2) Transcribe
 jp2subs transcribe workdir/audio.flac --workdir workdir --model-size large-v3
 
-# 3) Romanize
+# 3) Romanize (optional)
 jp2subs romanize workdir/master.json --workdir workdir
 
-# 4) Translate (e.g., English, provider via llama.cpp)
-jp2subs translate workdir/master.json --to en --mode llm --provider local --block-size 20
+# 4) Export Japanese subtitles
+jp2subs export workdir/master.json --format ass --lang ja --out workdir/subs_ja.ass
 
-# 5) Export bilingual subtitles (JP + EN)
-jp2subs export workdir/master.json --format ass --lang en --bilingual ja --out workdir/subs_en.ass
+# 5) Apply subtitles (soft-mux, hard-burn, or sidecar)
+jp2subs softcode input.mkv workdir/subs_ja.ass --same-name --container mkv
+jp2subs hardcode input.mkv workdir/subs_ja.ass --same-name --suffix .hard --crf 18
+jp2subs sidecar input.mkv workdir/subs_ja.ass --out-dir releases
 
-# 6) Apply subtitles (soft-mux, hard-burn, or sidecar)
-jp2subs softcode input.mkv workdir/subs_en.ass --same-name --container mkv
-jp2subs hardcode input.mkv workdir/subs_en.ass --same-name --suffix .hard --crf 18
-jp2subs sidecar input.mkv workdir/subs_en.ass --out-dir releases
+# Need another language? Translate the generated transcript with a local LLM, DeepL, or ChatGPT, then remux using hardcode/softcode/sidecar.
 ```
 
-Tip: leave the translation language field blank in the GUI/wizard to run transcription-only (Japanese transcripts + `subs_ja.*`). Translation is optional.
+Tip: jp2subs now always outputs Japanese transcripts/subtitles; use those files with an external translator if you need another language.
 
 ### Configure inside the app
-- Open the **Settings** tab in the GUI to edit `ffmpeg_path`, default ASR model/beam/vad/mono, subtitle format, and translation provider credentials.
+- Open the **Settings** tab in the GUI to edit `ffmpeg_path`, default ASR model/beam/vad/mono, and subtitle format.
 - Use **Save** to write changes immediately to `%APPDATA%/jp2subs/config.toml` (or `~/.config/jp2subs` on non-Windows). **Load** refreshes from disk and **Reset** restores built-in defaults.
 - The **Pipeline** tab exposes advanced ASR overrides (threads, patience, length penalty, compute type, raw extra args) and highlights each stage as it runs.
 
-## Enable local translation (Windows)
-1. **Install jp2subs and extras**
-   - Python 3.11+
-   - ffmpeg on PATH
-   - `pip install -e .`
-   - Optional extras: `pip install -e ".[gui,asr,llm]"`
-
-2. **Download llama.cpp (choose one)**
-   - Grab a prebuilt from `ggml-org/llama.cpp` releases (CPU, Vulkan, or CUDA).
-   - CPU (works everywhere)
-   - Vulkan (GPU-accelerated on many systems)
-   - CUDA (NVIDIA; requires compatible driver)
-   - jp2subs uses llama.cpp binaries (`llama-cli` or `llama-server`) for local translation; you must download them separately.
-   - Extract the release to `%APPDATA%\jp2subs\deps\llama.cpp\<version>\` and note the path to `llama-cli.exe`.
-
-3. **Download a GGUF model**
-   - Recommended: `Qwen/Qwen2.5-7B-Instruct-GGUF` (quant `Q4_K_M`).
-   - Download the `.gguf` file locally and point jp2subs to it.
-   - Some Hugging Face models are split; merge with `llama-gguf-split --merge part-* -o merged.gguf` if needed.
-
-4. **Configure jp2subs (config.toml or env)**
-   - `config.toml` example:
-
-     ```toml
-     [translation]
-     provider = "local"
-     mode = "llm"
-     llama_binary = "C:/Users/you/AppData/Roaming/jp2subs/deps/llama.cpp/vX.Y.Z/llama-cli.exe"
-     llama_model = "C:/models/qwen2.5-7b-instruct.Q4_K_M.gguf"
-     ```
-
-   - Environment variable alternative:
-     - `JP2SUBS_LLAMA_BINARY` → path to `llama-cli.exe`
-     - `JP2SUBS_LLAMA_MODEL` → path to your `.gguf`
-
-5. **Verify**
-   - Run `jp2subs translate ...` to confirm translation runs, or start the wizard/GUI.
-   - If translation is missing, jp2subs warns and continues with transcription-only so you still get Japanese transcripts and `subs_ja.*` files.
+## Translation
+Translation is no longer built into jp2subs. Use an external option such as DeepL, ChatGPT, or a local LLM runner to translate the generated Japanese transcripts before muxing them back with the hardcode/softcode/sidecar commands.
 
 ## Build a Windows executable (.exe)
 Install PyInstaller and the `gui` extra, then run the PowerShell script:
@@ -124,24 +82,13 @@ See [`examples/master.sample.json`](examples/master.sample.json) for the full co
 {
   "meta": {"source": "...", "created_at": "...", "tool_versions": {...}, "settings": {...}},
   "segments": [
-    {"id": 1, "start": 12.34, "end": 15.82, "ja_raw": "...", "romaji": "...", "translations": {"en": "..."}}
+    {"id": 1, "start": 12.34, "end": 15.82, "ja_raw": "...", "romaji": "..."}
   ]
 }
 ```
 
-## Built-in prompts (quality and fidelity)
-- **Minimal normalization (optional)**: keep tics, no rewrites.
-- **Faithful-natural translation (blocks)**: prioritize fidelity, avoid inventing content, keep interjections and honorifics; one output per line.
-- **Post-edit (draft+postedit)**: refine a draft translation while preserving intent and vocal tics.
-Full texts live in `src/jp2subs/translation.py`.
-
-## Translation quality guidelines
-- Fidelity first: avoid inventing or trimming filler (えっと, あの, うん, etc.).
-- Preserve repetitions/hesitations, proper names, and honorifics unless a glossary overrides them.
-- Optional glossary via JSON (`--glossary`), applied by the provider.
-
 ## Repository structure
-- `src/jp2subs/`: source code (CLI, ASR wrapper, romanization, translation, exporters, ffmpeg helpers)
+- `src/jp2subs/`: source code (CLI, ASR wrapper, romanization, exporters, ffmpeg helpers)
 - `examples/`: `master.sample.json` and usage tips
 - `configs/`: space for presets (add yours)
 - `.github/workflows/ci.yml`: basic lint/tests
@@ -161,7 +108,6 @@ pytest
   - `jp2subs sidecar <video> <subs> --out-dir player\downloads` to copy/rename the subtitle, compatible with players that read external files.
 
 ## Suggested roadmap
-- Integrate NLLB directly (onnx/ct2) for draft.
 - Add ASS style presets tuned for anime.
 - Optional richer UI.
 

@@ -38,13 +38,6 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
         doc.add_romaji(["konnichiwa"])
         return doc
 
-    def fake_translate(doc: MasterDocument, target_langs, **_: object) -> MasterDocument:
-        calls["translate"] += 1
-        for seg in doc.segments:
-            for lang in target_langs:
-                seg.translations[lang] = "hello"
-        return doc
-
     def fake_write_subtitles(doc: MasterDocument, path: Path, fmt: str, lang: str, secondary: str | None = None):
         calls["export"] += 1
         path.write_text(f"{fmt}-{lang}-{secondary or ''}", encoding="utf-8")
@@ -53,7 +46,6 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.audio, "ingest_media", fake_ingest)
     monkeypatch.setattr(cli.asr, "transcribe_audio", fake_transcribe)
     monkeypatch.setattr(cli.romanizer, "romanize_segments", fake_romanize)
-    monkeypatch.setattr(cli.translation, "translate_document", fake_translate)
     monkeypatch.setattr(cli.subtitles, "write_subtitles", fake_write_subtitles)
 
     result = runner.invoke(
@@ -65,12 +57,6 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
             str(workdir),
             "--ext",
             "mp4",
-            "--to",
-            "en",
-            "--mode",
-            "llm",
-            "--provider",
-            "local",
         ],
     )
 
@@ -80,7 +66,7 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
     for stage in cli.BATCH_STAGES:
         assert (workdir_path / f".{stage}.done").exists()
     master_doc = io.load_master(io.master_path_from_workdir(workdir_path))
-    assert master_doc.segments[0].translations.get("en") == "hello"
+    assert master_doc.segments[0].ja_raw == "こんにちは"
     assert all(count == 1 for count in calls.values())
 
     second = runner.invoke(
@@ -92,12 +78,6 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
             str(workdir),
             "--ext",
             "mp4",
-            "--to",
-            "en",
-            "--mode",
-            "llm",
-            "--provider",
-            "local",
         ],
     )
 

@@ -40,34 +40,8 @@ def is_translation_available(cfg: config_mod.AppConfig | None = None) -> tuple[b
     human-readable explanation.
     """
 
-    cfg = cfg or _load_config()
-    translation_cfg = cfg.translation if cfg else config_mod.TranslationConfig()
-    provider = (translation_cfg.provider or "echo").lower()
+    return False, "Translation support has been removed from jp2subs; use an external translator."
 
-    if provider == "echo":
-        return True, ""
-
-    if provider == "api":
-        url = os.getenv("JP2SUBS_API_URL") or translation_cfg.api_url
-        if not url:
-            return False, "API URL missing for translation provider=api."
-        return True, ""
-
-    if provider == "local":
-        binary_path = _normalize_path(os.getenv("JP2SUBS_LLAMA_BINARY") or translation_cfg.llama_binary)
-        model_path = _normalize_path(os.getenv("JP2SUBS_LLAMA_MODEL") or translation_cfg.llama_model)
-
-        if not binary_path:
-            return False, "llama.cpp binary not configured (set translation.llama_binary or JP2SUBS_LLAMA_BINARY)."
-        if not binary_path.exists():
-            return False, f"llama.cpp binary not found: {binary_path}"
-        if not model_path:
-            return False, "GGUF model not configured (set translation.llama_model or JP2SUBS_LLAMA_MODEL)."
-        if not model_path.exists():
-            return False, f"GGUF model not found: {model_path}"
-        return True, ""
-
-    return False, f"Unsupported translation provider: {provider}"
 
 console = Console()
 
@@ -255,6 +229,11 @@ def translate_document(
     is_cancelled: Callable[[], bool] | None = None,
     register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> MasterDocument:
+    raise RuntimeError(
+        "Translation support has been removed from jp2subs. Use a local LLM, DeepL, or ChatGPT to translate transcripts."
+    )
+
+    # The logic below is intentionally unreachable but preserved for reference.
     provider_impl = _provider_from_name(provider)
     langs = list(target_langs)
     total_blocks = sum((len(doc.segments) + block_size - 1) // block_size for _ in langs)

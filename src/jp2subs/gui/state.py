@@ -13,12 +13,7 @@ class PipelineJob:
     source: Path | None = None
     workdir: Path | None = None
     generate_romaji: bool = False
-    languages: List[str] = field(default_factory=list)
-    bilingual: str | None = None
     fmt: str = "srt"
-    translation_mode: str = "llm"
-    translation_provider: str = "local"
-    glossary: Path | None = None
     beam_size: int = 5
     model_size: str = "large-v3"
     vad: bool = True

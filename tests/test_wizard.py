@@ -5,7 +5,6 @@ from typer.testing import CliRunner
 from jp2subs import cli
 from jp2subs.models import MasterDocument, Meta, Segment
 
-
 runner = CliRunner()
 
 
@@ -44,13 +43,6 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
         doc.add_romaji(["konnichiwa"])
         return doc
 
-    def fake_translate(doc: MasterDocument, target_langs, **_: object) -> MasterDocument:
-        calls.append("translate")
-        for seg in doc.segments:
-            for lang in target_langs:
-                seg.translations[lang] = "hello"
-        return doc
-
     def fake_write_subtitles(doc: MasterDocument, path: Path, fmt: str, lang: str, secondary: str | None = None):
         calls.append("export")
         path.write_text(f"{fmt}-{lang}-{secondary or ''}", encoding="utf-8")
@@ -59,8 +51,6 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.audio, "ingest_media", fake_ingest)
     monkeypatch.setattr(cli.asr, "transcribe_audio", fake_transcribe)
     monkeypatch.setattr(cli.romanizer, "romanize_segments", fake_romanize)
-    monkeypatch.setattr(cli.translation, "translate_document", fake_translate)
-    monkeypatch.setattr(cli.translation, "is_translation_available", lambda cfg=None: (True, ""))
     monkeypatch.setattr(cli.subtitles, "write_subtitles", fake_write_subtitles)
 
     inputs = "\n".join(
@@ -73,11 +63,7 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
             "",  # vad default (on)
             "1",  # device auto
             "y",  # romaji
-            "en",  # languages
-            "",  # mode default
-            "",  # provider default
             "1",  # format srt
-            "",  # bilingual
             "",  # output type default
         ]
     )
@@ -85,13 +71,13 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["wizard"], input=inputs + "\n")
 
     assert result.exit_code == 0, result.output
-    assert calls == ["ingest", "transcribe", "romanize", "translate", "export"]
+    assert calls == ["ingest", "transcribe", "romanize", "export"]
 
-    exported = workdir / "subs_en.srt"
+    exported = workdir / "subs_ja.srt"
     assert exported.exists()
 
 
-def test_wizard_warns_when_translation_missing(tmp_path, monkeypatch):
+def test_wizard_handles_transcription_only(tmp_path, monkeypatch):
     media = tmp_path / "episode.mp4"
     media.write_text("data", encoding="utf-8")
 
@@ -118,8 +104,6 @@ def test_wizard_warns_when_translation_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.audio, "ingest_media", fake_ingest)
     monkeypatch.setattr(cli.asr, "transcribe_audio", fake_transcribe)
     monkeypatch.setattr(cli.romanizer, "romanize_segments", lambda doc: doc)
-    monkeypatch.setattr(cli.translation, "is_translation_available", lambda cfg=None: (False, "llama missing"))
-    monkeypatch.setattr(cli.translation, "translate_document", lambda *args, **kwargs: args[0])
     monkeypatch.setattr(cli.subtitles, "write_subtitles", fake_write_subtitles)
 
     inputs = "\n".join(
@@ -132,11 +116,7 @@ def test_wizard_warns_when_translation_missing(tmp_path, monkeypatch):
             "",  # vad default (on)
             "1",  # device auto
             "n",  # romaji
-            "en",  # languages
-            "",  # mode default
-            "",  # provider default
             "1",  # format srt
-            "",  # bilingual
             "",  # output type default
         ]
     )
@@ -144,7 +124,6 @@ def test_wizard_warns_when_translation_missing(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["wizard"], input=inputs + "\n")
 
     assert result.exit_code == 0, result.output
-    assert "translation is not configured" in result.output.lower()
     assert calls == ["ingest", "transcribe", "export"]
 
     exported = workdir / "subs_ja.srt"

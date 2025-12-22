@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
 
-from . import asr, audio, romanizer, subtitles, translation
+from . import asr, audio, romanizer, subtitles
 from . import io as io_mod
 from .config import load_config
 from .paths import default_workdir_for_input
@@ -60,34 +60,10 @@ class PipelineRunner:
                 doc = self._stage("Romanize", lambda: romanizer.romanize_segments(doc, on_progress=self._emit_progress))
                 io_mod.save_master(doc, master_path)
 
-            languages_for_export: List[str] = ["ja"]
-            if job.languages:
-                cfg = load_config()
-                cfg.translation.provider = job.translation_provider
-                ok, reason = translation.is_translation_available(cfg)
-                if ok:
-                    doc = self._stage(
-                        "Translate",
-                        lambda: translation.translate_document(
-                            doc,
-                            target_langs=job.languages,
-                            mode=job.translation_mode,
-                            provider=job.translation_provider,
-                            block_size=20,
-                            glossary=None,
-                            on_progress=self._emit_progress,
-                            is_cancelled=lambda: self._cancelled,
-                        ),
-                    )
-                    io_mod.save_master(doc, master_path)
-                    languages_for_export = list(job.languages)
-                else:
-                    self._log(f"Translation disabled: {reason} Continuing with Japanese subtitles only.")
-
             outputs.extend(
                 self._stage(
                     "Export",
-                    lambda: self._export(doc, workdir, languages_for_export, job.fmt, job.bilingual),
+                    lambda: self._export(doc, workdir, ["ja"], job.fmt, None),
                 )
             )
             if self.callbacks.on_item_done:
