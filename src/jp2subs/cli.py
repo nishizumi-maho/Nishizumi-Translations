@@ -72,12 +72,23 @@ def translate(
     provider: str = typer.Option("echo", help="Translation provider: echo|local|api"),
     block_size: int = 20,
     glossary: Optional[Path] = typer.Option(None, help="Optional glossary JSON mapping source->target"),
+    honorifics: str = typer.Option("keep", help="Honorific handling: keep|drop"),
+    tics: str = typer.Option("keep", help="Interjection/tic handling: keep|light"),
 ):
     """Translate segments to the requested languages."""
 
     doc = io.load_master(master)
     glossary_data = json.loads(glossary.read_text(encoding="utf-8")) if glossary else None
-    doc = translation.translate_document(doc, target_langs=to, mode=mode, provider=provider, block_size=block_size, glossary=glossary_data)
+    doc = translation.translate_document(
+        doc,
+        target_langs=to,
+        mode=mode,
+        provider=provider,
+        block_size=block_size,
+        glossary=glossary_data,
+        honorifics=honorifics,
+        tics=tics,
+    )
     io.save_master(doc, master)
     console.print(f"Translations added to {master}")
 
