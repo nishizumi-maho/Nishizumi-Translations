@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.prompt import Confirm, IntPrompt, Prompt
 
-from . import config
+from . import config, deps
 from .paths import coerce_workdir, default_workdir_for_input, normalize_input_path, strip_quotes
 
 from . import __version__
@@ -22,6 +22,9 @@ from .models import MasterDocument
 BATCH_STAGES: Sequence[str] = ("ingest", "transcribe", "romanize", "translate", "export")
 
 app = typer.Typer(add_completion=False, help="jp2subs: end-to-end JP transcription, translation, and subtitling")
+deps_app = typer.Typer(add_completion=False, help="Manage optional jp2subs dependencies")
+
+app.add_typer(deps_app, name="deps")
 console = Console()
 
 
@@ -29,6 +32,28 @@ console = Console()
 def main(ctx: typer.Context):
     """jp2subs CLI entrypoint."""
     ctx.obj = {}
+
+
+@deps_app.command(name="install-llama")
+def deps_install_llama():
+    """Download llama.cpp Windows binaries and configure jp2subs."""
+
+    deps.install_llama(console)
+
+
+@deps_app.command()
+def doctor():
+    """Check local dependency health (ffmpeg, llama.cpp)."""
+
+    code = deps.doctor(console)
+    raise typer.Exit(code=code)
+
+
+@app.command(name="install-llama")
+def install_llama_alias():
+    """Shortcut for `jp2subs deps install-llama`."""
+
+    deps.install_llama(console)
 
 
 @app.command()

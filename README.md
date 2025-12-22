@@ -28,7 +28,9 @@ pip install jp2subs[gui]     # PySide6 para a interface desktop
 
 Modelos:
 - **faster-whisper**: baixe um modelo (ex: `large-v3`) e deixe o cache padrão (~AppData/Local/whisper).
-- **llama.cpp**: defina `JP2SUBS_LLAMA_BINARY` para o executável e `JP2SUBS_LLAMA_MODEL` para o arquivo GGUF.
+- **llama.cpp**: execute `jp2subs deps install-llama` (ou `jp2subs install-llama`) para baixar o release mais recente para
+  `%APPDATA%\\jp2subs\\deps\\llama.cpp\\<tag>` e configurar `translation.llama_binary` em `%APPDATA%\\jp2subs\\config.toml`.
+  Aponte `translation.llama_model` (ou `JP2SUBS_LLAMA_MODEL`) para o seu arquivo `model.gguf`.
 - **NLLB** (rascunho opcional): utilize seu executor preferido offline (hook manual no provider ou pré-processo).
 
 ## Uso rápido

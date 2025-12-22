@@ -25,6 +25,12 @@ def default_config_path() -> Path:
     return _app_config_dir() / "config.toml"
 
 
+def app_config_dir() -> Path:
+    """Public accessor for the jp2subs configuration directory."""
+
+    return _app_config_dir()
+
+
 @dataclass
 class TranslationConfig:
     mode: str = "llm"
