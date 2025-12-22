@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "source": "examples/sample.wav",
+    "created_at": "2025-01-01T00:00:00",
+    "tool_versions": {
+      "faster_whisper": "large-v3"
+    },
+    "settings": {
+      "beam_size": "5",
+      "vad_filter": "True",
+      "temperature": "0.0"
+    }
+  },
+  "segments": [
+    {
+      "id": 1,
+      "start": 1.2,
+      "end": 2.8,
+      "ja_raw": "えっと… それは違うよ。",
+      "romaji": "etto... sore wa chigau yo.",
+      "translations": {
+        "pt-BR": "É… isso tá errado.",
+        "en": "Um… that's not right."
+      }
+    },
+    {
+      "id": 2,
+      "start": 3.0,
+      "end": 4.5,
+      "ja_raw": "うん、わかった。",
+      "romaji": "un, wakatta.",
+      "translations": {
+        "pt-BR": "Uhum, entendi.",
+        "en": "Yeah, got it."
+      }
+    }
+  ]
+}
