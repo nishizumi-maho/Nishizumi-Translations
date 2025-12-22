@@ -70,6 +70,7 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
             "",  # model_size default
             "",  # beam_size default
             "",  # vad default (on)
+            "1",  # device auto
             "y",  # romaji
             "en",  # languages
             "",  # mode default

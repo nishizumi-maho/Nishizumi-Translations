@@ -43,7 +43,7 @@ def transcribe(
     input_path: Path,
     workdir: Path = typer.Option(Path("workdir")),
     model_size: str = "large-v3",
-    device: Optional[str] = None,
+    device: str = typer.Option("auto", help="ASR device: auto|cuda|cpu"),
     vad: bool = True,
     temperature: float = 0.0,
     beam_size: int = 5,
@@ -321,6 +321,8 @@ def _wizard_impl():
     beam_size = IntPrompt.ask("Beam size", default=cfg.defaults.beam_size)
     vad_choice = _prompt_choice("VAD filter?", {"1": "on", "2": "off"}, "1" if cfg.defaults.vad else "2")
     vad_filter = vad_choice == "1"
+    device_choice = _prompt_choice("Device: [1] auto [2] cuda [3] cpu", {"1": "auto", "2": "cuda", "3": "cpu"}, "1")
+    device = {"1": "auto", "2": "cuda", "3": "cpu"}[device_choice]
 
     romaji_choice = _prompt_choice("Generate romaji?", {"y": "yes", "n": "no"}, "n")
     generate_romaji = romaji_choice == "y"
@@ -355,7 +357,7 @@ def _wizard_impl():
             vad_filter=vad_filter,
             temperature=0.0,
             beam_size=beam_size,
-            device=None,
+            device=device,
         )
         master_path = io.master_path_from_workdir(workdir)
         io.save_master(doc, master_path)

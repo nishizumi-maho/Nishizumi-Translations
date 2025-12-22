@@ -66,7 +66,7 @@ class PipelineWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[mi
             vad_filter=self.job.vad,
             temperature=0.0,
             beam_size=self.job.beam_size,
-            device=None,
+            device="auto",
             on_progress=self._emit_progress,
             is_cancelled=self._is_cancelled,
         )

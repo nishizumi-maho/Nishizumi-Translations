@@ -19,7 +19,7 @@ def transcribe_audio(
     vad_filter: bool = True,
     temperature: float = 0.0,
     beam_size: int = 5,
-    device: Optional[str] = None,
+    device: Optional[str] = "auto",
     *,
     on_progress: Callable[[ProgressEvent], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
@@ -39,7 +39,7 @@ def transcribe_audio(
             ProgressEvent(stage="Transcribe", percent=transcribe_time_percent(0, 1), message="Transcrevendo (ASR)...")
         )
     audio_duration = _probe_duration(audio_path)
-    model = WhisperModel(model_size, device=device)
+    model = _create_model_with_fallback(WhisperModel, model_size=model_size, device=device)
     segments_iter, info = model.transcribe(
         str(audio_path),
         language="ja",
@@ -89,6 +89,34 @@ def transcribe_audio(
         settings={"vad_filter": str(vad_filter), "temperature": str(temperature), "beam_size": str(beam_size)},
     )
     return MasterDocument(meta=meta, segments=segments)
+
+
+def _create_model_with_fallback(WhisperModel, *, model_size: str, device: Optional[str]):
+    normalized_device = (device or "auto").lower()
+
+    def _build(target: Optional[str]):
+        kwargs = {}
+        if target:
+            kwargs["device"] = target
+        return WhisperModel(model_size, **kwargs)
+
+    if normalized_device == "auto":
+        try:
+            console.print("ASR device: cuda")
+            return _build("cuda")
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"CUDA não disponível/erro ao inicializar, usando CPU: {exc}")
+            console.print("ASR device: cpu")
+            return _build("cpu")
+
+    if normalized_device in {"cuda", "cpu"}:
+        console.print(f"ASR device: {normalized_device}")
+        try:
+            return _build(normalized_device)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Falha ao inicializar ASR com device='{normalized_device}': {exc}") from exc
+
+    raise ValueError("device must be one of: auto, cuda, cpu")
 
 
 def _iter_segments(segments_iter: Iterable) -> Iterable[dict]:
