@@ -47,11 +47,11 @@ jp2subs translate workdir/master.json --to pt-BR --to en --mode llm --provider l
 # 5) Exportar legendas bilíngues (JP + PT-BR)
 jp2subs export workdir/master.json --format ass --lang pt-BR --bilingual ja --out workdir/subs_pt-BR.ass
 
-# 6) Soft-mux em MKV
-jp2subs mux-soft input.mkv workdir/subs_pt-BR.ass --out output.mkv
-
-# 7) Hard-burn
-jp2subs burn input.mkv workdir/subs_pt-BR.ass --out output_hard.mp4 --codec libx264 --crf 18
+# 6) Gere/edite as legendas e depois escolha o modo secundário
+#    Softcode (mkv/mp4 sem reencode), hardcode (burn-in) ou sidecar (somente copiar)
+jp2subs softcode input.mkv workdir/subs_pt-BR.ass --same-name --container mkv
+jp2subs hardcode input.mkv workdir/subs_pt-BR.ass --same-name --suffix .hard --crf 18
+jp2subs sidecar input.mkv workdir/subs_pt-BR.ass --out-dir releases
 ```
 
 ## Formato do JSON mestre
@@ -89,6 +89,13 @@ pip install -e .
 pip install pytest
 pytest
 ```
+
+## Modo secundário de legendagem
+- Depois de exportar/editar as legendas, use os comandos dedicados para aplicá-las ao vídeo:
+  - `jp2subs softcode <video> <subs> --same-name --container mkv` para mux (sem reencode, usa mov_text automaticamente para MP4).
+  - `jp2subs hardcode <video> <subs> --suffix .hard --crf 18` para burn-in com libass, respeitando ASS/SRT/VTT.
+  - `jp2subs sidecar <video> <subs> --out-dir player\downloads` para apenas copiar/renomear a legenda, mantendo compatibilidade com players que leem arquivos separados.
+
 
 ## Roadmap sugerido
 - Integrar NLLB direto (onnx/ct2) para draft.

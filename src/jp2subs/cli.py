@@ -112,6 +112,89 @@ def export(
     console.print(f"Subtitle written to [bold]{output_path}[/bold]")
 
 
+@app.command()
+def softcode(
+    video_path: Path,
+    subtitle: Path,
+    out_dir: Path | None = typer.Option(None, help="Output directory"),
+    container: str = typer.Option("mkv", case_sensitive=False, help="Output container mkv|mp4"),
+    same_name: bool = typer.Option(False, help="Name output after the video"),
+    suffix: str | None = typer.Option(None, help="Optional suffix before extension"),
+    lang: str | None = typer.Option("pt-BR", help="Subtitle language code"),
+    out: Path | None = typer.Option(None, help="Override output path"),
+    verbose: bool = typer.Option(False, help="Show ffmpeg command"),
+):
+    """Soft-mux subtitles into a container."""
+
+    container = container.lower()
+    out_path = video.build_out_path(
+        video_path, subtitle, out_dir, same_name, suffix, container, mode="softcode", out=out
+    )
+    console.print("[bold]Modo:[/bold] softcode")
+    console.print(f"Vídeo: {video_path}")
+    console.print(f"Legenda: {subtitle}")
+    console.print(f"Saída: {out_path}")
+    result = video.run_ffmpeg_mux_soft(
+        video_path, subtitle, out_path, container=container, lang=lang, verbose=verbose
+    )
+    console.print(f"Muxed file at [bold]{result}[/bold]")
+
+
+@app.command()
+def hardcode(
+    video_path: Path,
+    subtitle: Path,
+    out_dir: Path | None = typer.Option(None, help="Output directory"),
+    same_name: bool = typer.Option(False, help="Name output after the video"),
+    suffix: str | None = typer.Option(".hard", help="Suffix before extension"),
+    codec: str = typer.Option("libx264", help="Video codec for re-encode"),
+    crf: int = typer.Option(18, help="Constant Rate Factor"),
+    preset: str = typer.Option("slow", help="FFmpeg preset"),
+    out: Path | None = typer.Option(None, help="Override output path"),
+    verbose: bool = typer.Option(False, help="Show ffmpeg command"),
+):
+    """Hard-burn subtitles into the video."""
+
+    out_path = video.build_out_path(
+        video_path, subtitle, out_dir, same_name, suffix, container="mp4", mode="hardcode", out=out
+    )
+    console.print("[bold]Modo:[/bold] hardcode")
+    console.print(f"Vídeo: {video_path}")
+    console.print(f"Legenda: {subtitle}")
+    console.print(f"Saída: {out_path}")
+    result = video.run_ffmpeg_burn(
+        video_path,
+        subtitle,
+        out_path,
+        codec=codec,
+        crf=crf,
+        preset=preset,
+        verbose=verbose,
+    )
+    console.print(f"Burned file at [bold]{result}[/bold]")
+
+
+@app.command()
+def sidecar(
+    video_path: Path,
+    subtitle: Path,
+    out_dir: Path | None = typer.Option(None, help="Output directory"),
+    same_name: bool = typer.Option(False, help="Rename subtitle to video stem"),
+    out: Path | None = typer.Option(None, help="Override output path"),
+):
+    """Copy subtitles as a sidecar file alongside the video."""
+
+    out_path = video.build_out_path(
+        video_path, subtitle, out_dir, same_name, suffix=None, container=None, mode="sidecar", out=out
+    )
+    console.print("[bold]Modo:[/bold] sidecar")
+    console.print(f"Vídeo: {video_path}")
+    console.print(f"Legenda: {subtitle}")
+    console.print(f"Saída: {out_path}")
+    result = video.copy_sidecar(video_path, subtitle, out_path)
+    console.print(f"Sidecar ready at [bold]{result}[/bold]")
+
+
 @app.command(name="mux-soft")
 def mux_soft_cmd(video_path: Path, subs_path: Path, out: Path = typer.Option(Path("out.mkv"))):
     """Soft-mux subtitles into MKV without re-encoding."""
