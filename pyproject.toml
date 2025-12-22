@@ -19,9 +19,11 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["requests>=2.31"]
 asr = ["faster-whisper>=1.0"]
+gui = ["PySide6>=6.6"]
 
 [project.scripts]
 jp2subs = "jp2subs.cli:main"
+jp2subs-gui = "jp2subs.gui.main:launch"
 
 [tool.setuptools.package-dir]
 "" = "src"

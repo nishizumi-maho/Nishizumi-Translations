@@ -12,6 +12,9 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.prompt import Confirm, IntPrompt, Prompt
 
+from . import config
+from .paths import coerce_workdir, default_workdir_for_input, normalize_input_path, strip_quotes
+
 from . import __version__
 from . import audio, asr, io, romanizer, subtitles, translation, video
 from .models import MasterDocument
@@ -244,27 +247,83 @@ def _parse_languages(raw_value: str) -> list[str]:
     return langs
 
 
+def _prompt_choice(label: str, options: dict[str, str], default: str) -> str:
+    rendered = " ".join([f"[{key}] {value}" for key, value in options.items()])
+    prompt_text = f"{label} {rendered} (default {default})"
+    while True:
+        raw = Prompt.ask(prompt_text, default=default)
+        answer = strip_quotes(raw).lower()
+        if answer == "":
+            answer = default
+        if answer in options:
+            return answer
+        console.print("[red]Escolha inválida.[/red]")
+
+
+def _prompt_path(label: str, allow_file: bool = True, allow_dir: bool = False) -> Path:
+    value = Prompt.ask(label).strip()
+    if value == "":
+        picked = _open_file_picker(allow_dir=allow_dir)
+        value = picked or value
+    normalized = normalize_input_path(value)
+    if allow_dir and normalized.suffix and not allow_file:
+        normalized = normalized.parent
+    return normalized
+
+
+def _open_file_picker(allow_dir: bool = False) -> str:
+    try:
+        import tkinter.filedialog as fd
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        if allow_dir:
+            return fd.askdirectory(title="Escolha uma pasta")
+        return fd.askopenfilename(title="Escolha um arquivo")
+    except Exception:
+        return ""
+
+
+def _doctor_ffmpeg() -> None:
+    ffmpeg_path = config.detect_ffmpeg()
+    if not ffmpeg_path:
+        raise typer.BadParameter("ffmpeg não encontrado no PATH. Instale ou configure em Settings.")
+
+
+def _summarize_config(defaults: config.AppConfig | None = None) -> config.AppConfig:
+    cfg = defaults or config.load_config()
+    detected_ffmpeg = config.detect_ffmpeg(cfg.ffmpeg_path)
+    if detected_ffmpeg:
+        cfg.ffmpeg_path = detected_ffmpeg
+    return cfg
+
+
 def _default_workdir(input_path: Path) -> Path:
     return Path("workdir") / input_path.stem
 
 
 def _wizard_impl():
     console.print("[bold]jp2subs Wizard[/bold] — interactive guided run\n")
-    input_raw = Prompt.ask("Input media/audio path")
-    input_path = Path(input_raw).expanduser()
+    cfg = _summarize_config()
+    input_path = _prompt_path("Input media/audio path (Enter abre file picker)")
     if not input_path.exists():
         console.print(f"[red]Input path not found:[/red] {input_path}")
         raise typer.Exit(code=1)
 
-    workdir_default = _default_workdir(input_path)
-    workdir = Path(Prompt.ask("Work directory", default=str(workdir_default))).expanduser()
+    workdir_default = default_workdir_for_input(input_path)
+    workdir_input = Prompt.ask("Work directory", default=str(workdir_default))
+    workdir = coerce_workdir(workdir_input)
 
-    mono = Confirm.ask("Extract mono audio?", default=False)
-    model_size = Prompt.ask("Transcription model size", default="large-v3")
-    beam_size = IntPrompt.ask("Beam size", default=5)
-    vad_filter = Confirm.ask("Enable VAD filtering?", default=True)
+    mono_choice = _prompt_choice("Mono audio?", {"1": "mono", "2": "stereo"}, "2")
+    mono = mono_choice == "1"
+    model_size = Prompt.ask("Transcription model size", default=cfg.defaults.model_size)
+    beam_size = IntPrompt.ask("Beam size", default=cfg.defaults.beam_size)
+    vad_choice = _prompt_choice("VAD filter?", {"1": "on", "2": "off"}, "1" if cfg.defaults.vad else "2")
+    vad_filter = vad_choice == "1"
 
-    generate_romaji = Confirm.ask("Generate romaji transcript?", default=False)
+    romaji_choice = _prompt_choice("Generate romaji?", {"y": "yes", "n": "no"}, "n")
+    generate_romaji = romaji_choice == "y"
 
     langs_raw = Prompt.ask("Translation target languages (comma-separated, e.g., en, pt-BR)")
     try:
@@ -273,11 +332,15 @@ def _wizard_impl():
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(code=1)
 
-    translation_mode = Prompt.ask("Translation mode", choices=["llm", "draft+postedit"], default="llm")
-    provider = Prompt.ask("Translation provider", choices=["local", "api"], default="local")
-    fmt = Prompt.ask("Subtitle format", choices=["srt", "vtt", "ass"], default="srt")
+    translation_mode = Prompt.ask("Translation mode", choices=["llm", "draft+postedit"], default=cfg.translation.mode)
+    provider = Prompt.ask("Translation provider", choices=["local", "api"], default=cfg.translation.provider)
+    fmt_choice = _prompt_choice("Subtitle format", {"1": "srt", "2": "vtt", "3": "ass"}, "1")
+    fmt = {"1": "srt", "2": "vtt", "3": "ass"}[fmt_choice]
     bilingual = Prompt.ask("Bilingual secondary language (optional, e.g., ja)", default="") or None
-    output_mode = Prompt.ask("Output type", choices=["subtitles", "mux-soft", "burn"], default="subtitles")
+    output_choice = _prompt_choice(
+        "Output type", {"1": "subtitles", "2": "mux-soft", "3": "burn"}, "1"
+    )
+    output_mode = {"1": "subtitles", "2": "mux-soft", "3": "burn"}[output_choice]
 
     steps: list[tuple[str, Callable[..., object]]] = []
     generated_paths: list[Path] = []
@@ -382,6 +445,42 @@ def _wizard_impl():
         console.print(f"- {path}")
 
 
+def _finalize_wizard():
+    console.print("[bold]Finalize Wizard[/bold] — mux/burn/sidecar\n")
+    video_path = _prompt_path("Vídeo de entrada (Enter abre file picker)")
+    if not video_path.exists():
+        console.print(f"[red]Vídeo não encontrado:[/red] {video_path}")
+        raise typer.Exit(code=1)
+
+    subtitle_path = _prompt_path("Legenda (SRT/VTT/ASS)")
+    if not subtitle_path.exists():
+        console.print(f"[red]Legenda não encontrada:[/red] {subtitle_path}")
+        raise typer.Exit(code=1)
+
+    mode_choice = _prompt_choice("Modo", {"1": "sidecar", "2": "softcode", "3": "hardcode"}, "1")
+    target_dir_input = Prompt.ask("Pasta de saída (Enter = mesma do vídeo)", default="")
+    target_dir = Path(target_dir_input) if target_dir_input else video_path.parent
+
+    suffix = None
+    codec = "libx264"
+    crf = 18
+    if mode_choice == "3":
+        crf = IntPrompt.ask("CRF", default=18)
+        codec = Prompt.ask("Codec", default="libx264")
+
+    if mode_choice == "1":
+        out_path = video.build_out_path(video_path, subtitle_path, target_dir, True, suffix, None, mode="sidecar")
+        result = video.copy_sidecar(video_path, subtitle_path, out_path)
+    elif mode_choice == "2":
+        out_path = video.build_out_path(video_path, subtitle_path, target_dir, True, suffix, "mkv", mode="softcode")
+        result = video.run_ffmpeg_mux_soft(video_path, subtitle_path, out_path, container="mkv", lang="ja")
+    else:
+        out_path = video.build_out_path(video_path, subtitle_path, target_dir, True, suffix, "mp4", mode="hardcode")
+        result = video.run_ffmpeg_burn(video_path, subtitle_path, out_path, codec=codec, crf=crf, preset="slow")
+
+    console.print(f"[green]Pronto:[/green] {result}")
+
+
 @app.command(name="wizard")
 def wizard_cmd():
     """Run the interactive jp2subs wizard."""
@@ -394,6 +493,39 @@ def menu_cmd():
     """Alias for the interactive wizard."""
 
     _wizard_impl()
+
+
+@app.command(name="w")
+def wizard_shortcut():
+    """Shortcut for wizard."""
+
+    _wizard_impl()
+
+
+@app.command(name="finalize")
+def finalize_cmd():
+    """Finalize wizard for mux/burn/sidecar."""
+
+    _finalize_wizard()
+
+
+@app.command(name="f")
+def finalize_shortcut():
+    """Shortcut for finalize wizard."""
+
+    _finalize_wizard()
+
+
+@app.command(name="ui")
+def ui_cmd():
+    """Launch the desktop GUI."""
+
+    try:
+        from .gui.main import launch
+    except Exception as exc:  # pragma: no cover - depends on environment
+        raise typer.BadParameter(f"Falha ao abrir UI: {exc}") from exc
+
+    launch()
 
 
 @app.command()

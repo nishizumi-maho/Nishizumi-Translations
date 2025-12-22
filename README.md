@@ -23,6 +23,7 @@ pip install -e .
 # Extras
 pip install jp2subs[asr]     # faster-whisper
 pip install jp2subs[llm]     # requests para API genérica
+pip install jp2subs[gui]     # PySide6 para a interface desktop
 ```
 
 Modelos:
@@ -32,6 +33,9 @@ Modelos:
 
 ## Uso rápido
 ```bash
+# Interface gráfica
+jp2subs ui
+
 # 1) Ingestão (extrai áudio para workdir)
 jp2subs ingest input.mkv --workdir workdir
 
@@ -53,6 +57,18 @@ jp2subs softcode input.mkv workdir/subs_pt-BR.ass --same-name --container mkv
 jp2subs hardcode input.mkv workdir/subs_pt-BR.ass --same-name --suffix .hard --crf 18
 jp2subs sidecar input.mkv workdir/subs_pt-BR.ass --out-dir releases
 ```
+
+## Gerar executável Windows (.exe)
+Instale PyInstaller e o extra `gui`, depois execute o script PowerShell:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+python -m pip install jp2subs[gui] pyinstaller
+pwsh scripts/build_exe.ps1
+```
+
+## Screenshots
+*(adicione suas capturas aqui; placeholders para catálogo)*
 
 ## Formato do JSON mestre
 Ver [`examples/master.sample.json`](examples/master.sample.json) para um contrato completo:

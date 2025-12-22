@@ -66,15 +66,15 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
         [
             str(media),
             str(workdir),
-            "n",  # mono
+            "2",  # stereo
             "",  # model_size default
             "",  # beam_size default
-            "",  # vad default
+            "",  # vad default (on)
             "y",  # romaji
             "en",  # languages
             "",  # mode default
-            "local",  # provider
-            "srt",  # format
+            "",  # provider default
+            "1",  # format srt
             "",  # bilingual
             "",  # output type default
         ]
