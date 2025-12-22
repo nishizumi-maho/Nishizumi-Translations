@@ -107,10 +107,51 @@ def mux_soft_cmd(video_path: Path, subs_path: Path, out: Path = typer.Option(Pat
 
 
 @app.command()
-def burn(video_path: Path, subs_path: Path, out: Path = typer.Option(Path("out_hard.mp4")), codec: str = "libx264", crf: int = 18):
+def burn(
+    video_path: Path,
+    subs_path: Path,
+    out: Path = typer.Option(Path("out_hard.mp4")),
+    codec: str = "libx264",
+    crf: int = 18,
+    font: str | None = typer.Option(None, help="Override ASS Fontname for burn-in"),
+    style: list[str] | None = typer.Option(None, help="Additional ASS force_style overrides (KEY=VALUE)"),
+    fonts_dir: Path | None = typer.Option(None, help="Directory containing fonts for libass"),
+):
     """Hard-burn subtitles into video using ffmpeg + libass."""
-    result = video.burn_subs(video_path, subs_path, out, codec=codec, crf=crf)
+
+    styles_dict = None
+    if style:
+        styles_dict = {}
+        for item in style:
+            if "=" not in item:
+                raise typer.BadParameter("Style overrides must use KEY=VALUE syntax")
+            key, value = item.split("=", 1)
+            styles_dict[key] = value
+
+    result = video.burn_subs(
+        video_path,
+        subs_path,
+        out,
+        codec=codec,
+        crf=crf,
+        font=font,
+        styles=styles_dict,
+        fonts_dir=fonts_dir,
+    )
     console.print(f"Burned file at {result}")
+
+
+@app.command()
+def doctor():
+    """Check runtime dependencies such as ffmpeg."""
+
+    try:
+        version_info = video.ffmpeg_version()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"ffmpeg detected: [bold]{version_info}[/bold]")
 
 
 def _write_transcripts(doc: MasterDocument, workdir: Path, prefix: str, lang: str, use_romaji: bool = False) -> None:
