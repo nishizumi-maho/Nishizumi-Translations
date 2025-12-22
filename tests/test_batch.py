@@ -66,7 +66,7 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
             "--ext",
             "mp4",
             "--to",
-            "pt-BR",
+            "en",
             "--mode",
             "llm",
             "--provider",
@@ -80,7 +80,7 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
     for stage in cli.BATCH_STAGES:
         assert (workdir_path / f".{stage}.done").exists()
     master_doc = io.load_master(io.master_path_from_workdir(workdir_path))
-    assert master_doc.segments[0].translations.get("pt-BR") == "hello"
+    assert master_doc.segments[0].translations.get("en") == "hello"
     assert all(count == 1 for count in calls.values())
 
     second = runner.invoke(
@@ -93,7 +93,7 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
             "--ext",
             "mp4",
             "--to",
-            "pt-BR",
+            "en",
             "--mode",
             "llm",
             "--provider",

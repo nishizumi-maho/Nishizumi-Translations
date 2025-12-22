@@ -35,7 +35,7 @@ def app_config_dir() -> Path:
 class TranslationConfig:
     mode: str = "llm"
     provider: str = "local"
-    target_languages: list[str] = field(default_factory=lambda: ["pt-BR"])
+    target_languages: list[str] = field(default_factory=lambda: ["en"])
     api_url: str | None = None
     api_key: str | None = None
     llama_binary: str | None = None

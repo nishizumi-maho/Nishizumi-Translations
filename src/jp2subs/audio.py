@@ -39,7 +39,7 @@ def ingest_media(
 
     ensure_workdir(workdir)
     if on_progress:
-        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 0), message="Extraindo áudio..."))
+        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 0), message="Extracting audio..."))
     src = Path(input_path)
     if not src.exists():
         raise FileNotFoundError(f"Input {src} not found")
@@ -50,7 +50,7 @@ def ingest_media(
         console.log(f"Copying audio to {audio_out}")
         shutil.copy(src, audio_out)
         if on_progress:
-            on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest concluído"))
+            on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest complete"))
         return audio_out
 
     if not is_video(src):
@@ -75,7 +75,7 @@ def ingest_media(
     run_command(cmd, "ffmpeg audio extraction", register_subprocess=register_subprocess)
     console.log(f"Audio extracted to {audio_out} ({channels})")
     if on_progress:
-        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest concluído"))
+        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest complete"))
     return audio_out
 
 

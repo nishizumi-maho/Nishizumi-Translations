@@ -26,6 +26,6 @@ def romanize_segments(
         romaji_list.append(romaji)
     doc.add_romaji(romaji_list)
     if on_progress:
-        on_progress(ProgressEvent(stage="Romanize", percent=stage_percent("Romanize", 1), message="Romanização concluída"))
+        on_progress(ProgressEvent(stage="Romanize", percent=stage_percent("Romanize", 1), message="Romanization complete"))
     return doc
 

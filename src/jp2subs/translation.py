@@ -265,14 +265,12 @@ def _translate_lang(
         completed_blocks += 1
         if on_progress:
             percent = stage_percent("Translate", completed_blocks / max(1, total_blocks))
-            detail = f"Bloco {block_index}/{(len(doc.segments) + block_size - 1) // block_size} ({target_lang})"
+            detail = f"Block {block_index}/{(len(doc.segments) + block_size - 1) // block_size} ({target_lang})"
             translated_count = start + len(block)
-            detail += f" | Segmentos traduzidos {translated_count}/{len(doc.segments)}"
-            on_progress(
-                ProgressEvent(stage="Translate", percent=percent, message="Traduzindo...", detail=detail)
-            )
+            detail += f" | Segments translated {translated_count}/{len(doc.segments)}"
+            on_progress(ProgressEvent(stage="Translate", percent=percent, message="Translating...", detail=detail))
     if on_progress:
-        on_progress(ProgressEvent(stage="Translate", percent=stage_percent("Translate", 1), message="Tradução concluída"))
+        on_progress(ProgressEvent(stage="Translate", percent=stage_percent("Translate", 1), message="Translation complete"))
     return completed_blocks
 
 

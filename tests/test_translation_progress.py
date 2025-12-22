@@ -29,7 +29,7 @@ def test_translate_document_emits_block_progress(monkeypatch):
 
     translation.translate_document(
         doc,
-        target_langs=["pt-BR"],
+        target_langs=["en"],
         block_size=2,
         on_progress=lambda evt: events.append(evt),
     )
@@ -37,6 +37,6 @@ def test_translate_document_emits_block_progress(monkeypatch):
     # 3 blocks for 5 segments + final completion event
     assert len(events) == 4
     assert events[0].percent == stage_percent("Translate", 1 / 3)
-    assert "Bloco 1/3" in events[0].detail
+    assert "Block 1/3" in events[0].detail
     assert events[-1].percent == stage_percent("Translate", 1)
-    assert events[-1].message.startswith("Tradução concluída")
+    assert events[-1].message.startswith("Translation complete")
