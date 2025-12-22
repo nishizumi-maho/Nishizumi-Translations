@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
+
+from .progress import ProgressEvent, stage_percent
 
 from .models import MasterDocument, Segment
 
@@ -191,6 +193,7 @@ def write_subtitles(
     *,
     max_chars_per_line: int = MAX_CHARS_PER_LINE,
     max_lines: int = MAX_LINES,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
 ) -> Path:
     path = Path(path)
     fmt = fmt.lower()
@@ -220,6 +223,15 @@ def write_subtitles(
         )
     else:
         raise ValueError(f"Unsupported subtitle format: {fmt}")
+    if on_progress:
+        on_progress(
+            ProgressEvent(
+                stage="Export",
+                percent=stage_percent("Export", 1),
+                message="Exportando...",
+                detail=f"Escrevendo {path.name}",
+            )
+        )
     path.write_text(content, encoding="utf-8")
     return path
 
