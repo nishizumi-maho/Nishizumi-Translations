@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Sequence
@@ -69,13 +70,26 @@ class LocalLlamaCPPProvider(TranslationProvider):
         prompt = TRANSLATION_PROMPT.format(target_lang=target_lang)
         glossary_hint = "\n".join(f"{k} -> {v}" for k, v in (glossary or {}).items())
         joined = "\n".join(lines)
-        full_prompt = f"{prompt}\nGlossary:\n{glossary_hint}\nINPUT:\n{joined}\nOUTPUT:".strip()
-        cmd = [self.binary_path, "-m", self.model_path, "-p", full_prompt]
+        output_format = (
+            "Return one translation per input line, each prefixed with its 0-based line number "
+            "and a tab character (example: `0\t<translation>`)."
+        )
+
+        if _env_truthy(os.getenv("JP2SUBS_LLAMA_CHAT")):
+            full_prompt = (
+                f"<system>\n{prompt.strip()}\n{output_format}\n</system>\n"
+                f"<user>\nGlossary:\n{glossary_hint}\nINPUT:\n{joined}\nOUTPUT:\n</user>"
+            )
+        else:
+            full_prompt = (
+                f"{prompt}\n{output_format}\nGlossary:\n{glossary_hint}\nINPUT:\n{joined}\nOUTPUT:"
+            ).strip()
+
+        llama_args = shlex.split(os.getenv("JP2SUBS_LLAMA_ARGS", ""))
+        cmd = [self.binary_path, "-m", self.model_path, *llama_args, "-p", full_prompt]
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        output_lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        if len(output_lines) < len(lines):
-            output_lines += ["" for _ in range(len(lines) - len(output_lines))]
-        return output_lines[: len(lines)]
+        output_lines = _parse_llama_output(result.stdout.splitlines(), len(lines))
+        return output_lines
 
 
 @dataclass
@@ -100,6 +114,28 @@ class GenericAPIProvider(TranslationProvider):
         response.raise_for_status()
         data = response.json()
         return list(data.get("translations", []))
+
+
+def _parse_llama_output(lines: Sequence[str], expected_len: int) -> List[str]:
+    outputs: List[str] = ["" for _ in range(expected_len)]
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or "\t" not in line:
+            continue
+        idx_str, text = line.split("\t", 1)
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if 0 <= idx < expected_len:
+            outputs[idx] = text.strip()
+    return outputs
+
+
+def _env_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def translate_document(
