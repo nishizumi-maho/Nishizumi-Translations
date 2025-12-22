@@ -30,7 +30,8 @@ Models:
 - **faster-whisper**: download a model (e.g., `large-v3`) and keep it in the default cache (~AppData/Local/whisper).
 - **llama.cpp**: run `jp2subs deps install-llama` (or `jp2subs install-llama`) to download the latest release to
   `%APPDATA%\\jp2subs\\deps\\llama.cpp\\<tag>` and set `translation.llama_binary` in `%APPDATA%\\jp2subs\\config.toml`.
-  Point `translation.llama_model` (or `JP2SUBS_LLAMA_MODEL`) to your `model.gguf` file.
+  Point `translation.llama_model` (or `JP2SUBS_LLAMA_MODEL`) to your `model.gguf` file. Run `jp2subs deps install-model`
+  to download a recommended GGUF to `%APPDATA%\\jp2subs\\models` and update the config automatically.
 - **NLLB** (optional draft): use your preferred offline runner (hook provider manually or pre-process).
 
 ## Quickstart

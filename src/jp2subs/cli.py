@@ -41,6 +41,13 @@ def deps_install_llama():
     deps.install_llama(console)
 
 
+@deps_app.command(name="install-model")
+def deps_install_model():
+    """Download a GGUF model and update configuration."""
+
+    deps.install_model(console)
+
+
 @deps_app.command()
 def doctor():
     """Check local dependency health (ffmpeg, llama.cpp)."""
@@ -54,6 +61,13 @@ def install_llama_alias():
     """Shortcut for `jp2subs deps install-llama`."""
 
     deps.install_llama(console)
+
+
+@app.command(name="install-model")
+def install_model_alias():
+    """Shortcut for `jp2subs deps install-model`."""
+
+    deps.install_model(console)
 
 
 @app.command()
