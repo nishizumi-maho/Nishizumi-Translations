@@ -8,7 +8,7 @@ def launch():  # pragma: no cover - UI bootstrap
     try:
         from PySide6 import QtWidgets
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("PySide6 não está instalado. Instale jp2subs[gui].") from exc
+        raise RuntimeError("PySide6 is not installed. Install jp2subs[gui].") from exc
 
     from .widgets import MainWindow
 

@@ -44,10 +44,10 @@ class PipelineWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[mi
                     proc.kill()
 
     def _execute(self):  # pragma: no cover - GUI thread
-        self.signals.log.emit("Preparando pipeline...")
+        self.signals.log.emit("Preparing pipeline...")
         source = self.job.source
         if not source:
-            raise RuntimeError("Fonte não definida")
+            raise RuntimeError("Source not provided")
         workdir = self.job.workdir or default_workdir_for_input(source)
         workdir = Path(workdir)
         self.signals.log.emit(f"Workdir: {workdir}")
@@ -119,11 +119,11 @@ class PipelineWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[mi
             self.signals.log.emit(f"Exportado: {output_path}")
 
         self._emit_progress(
-            ProgressEvent(stage="Export", percent=self._stage_percent("Export", 1), message="Export finalizado")
+            ProgressEvent(stage="Export", percent=self._stage_percent("Export", 1), message="Export complete")
         )
 
         self.signals.results.emit(subtitles_root)
-        self.signals.stage.emit("Concluído")
+        self.signals.stage.emit("Complete")
         self.signals.detail.emit("")
 
     def _check_cancel(self):  # pragma: no cover - GUI thread
@@ -169,7 +169,7 @@ class FinalizeWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[mi
 
     def _execute(self):  # pragma: no cover - GUI thread
         if not self.job.video or not self.job.subtitle:
-            raise RuntimeError("Vídeo ou legenda ausente")
+            raise RuntimeError("Video or subtitle missing")
         out_dir = self.job.out_dir or self.job.video.parent
         if self.job.mode == "sidecar":
             out = video.build_out_path(self.job.video, self.job.subtitle, out_dir, True, None, None, mode="sidecar")

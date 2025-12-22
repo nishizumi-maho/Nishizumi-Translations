@@ -53,7 +53,7 @@ def validate_subtitle_format(container: str, subtitle: str | Path) -> str:
 
     if container == "mp4":
         if ext == "ass":
-            raise ValueError("MP4 não suporta ASS; use MKV ou converta")
+            raise ValueError("MP4 does not support ASS; use MKV or convert the subtitles")
         if ext not in {"srt", "vtt"}:
             raise ValueError("MP4 soft-mux only supports SRT or VTT subtitles")
         return "mov_text"

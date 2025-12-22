@@ -39,10 +39,10 @@ def test_bilingual_two_fixed_lines():
         start=4.0,
         end=5.0,
         ja_raw="さようなら",
-        translations={"ja": "さようなら", "pt-BR": "Tchau"},
+        translations={"ja": "さようなら", "en": "Goodbye"},
     )
-    lines = segment_payload(segment, "pt-BR", "ja")
+    lines = segment_payload(segment, "en", "ja")
     assert len(lines) == 2
     assert lines[0] == "さようなら"
-    assert lines[1] == "Tchau"
+    assert lines[1] == "Goodbye"
     assert "/" not in "".join(lines)

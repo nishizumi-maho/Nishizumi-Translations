@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - allow import without Qt
 class BaseWidget(QtWidgets.QWidget if QtWidgets else object):  # type: ignore[misc]
     def __init__(self, *args, **kwargs):
         if not QtWidgets:
-            raise RuntimeError("PySide6 é necessário para a GUI")
+            raise RuntimeError("PySide6 is required for the GUI")
         super().__init__(*args, **kwargs)
 
 
@@ -33,14 +33,14 @@ class PipelineTab(BaseWidget):
 
         file_row = QtWidgets.QHBoxLayout()
         self.source_edit = QtWidgets.QLineEdit()
-        pick_btn = QtWidgets.QPushButton("Escolher arquivo")
+        pick_btn = QtWidgets.QPushButton("Choose file")
         pick_btn.clicked.connect(self._choose_source)
         file_row.addWidget(self.source_edit)
         file_row.addWidget(pick_btn)
 
         workdir_row = QtWidgets.QHBoxLayout()
         self.workdir_edit = QtWidgets.QLineEdit()
-        workdir_btn = QtWidgets.QPushButton("Pasta workdir")
+        workdir_btn = QtWidgets.QPushButton("Workdir folder")
         workdir_btn.clicked.connect(self._choose_workdir)
         workdir_row.addWidget(self.workdir_edit)
         workdir_row.addWidget(workdir_btn)
@@ -53,7 +53,7 @@ class PipelineTab(BaseWidget):
         self.vad_check = QtWidgets.QCheckBox("VAD")
         self.vad_check.setChecked(True)
         self.mono_check = QtWidgets.QCheckBox("Mono")
-        options_row.addWidget(QtWidgets.QLabel("Modelo"))
+        options_row.addWidget(QtWidgets.QLabel("Model"))
         options_row.addWidget(self.model_input)
         options_row.addWidget(QtWidgets.QLabel("Beam"))
         options_row.addWidget(self.beam_slider)
@@ -61,31 +61,31 @@ class PipelineTab(BaseWidget):
         options_row.addWidget(self.mono_check)
 
         translation_row = QtWidgets.QHBoxLayout()
-        self.lang_edit = QtWidgets.QLineEdit("pt-BR")
+        self.lang_edit = QtWidgets.QLineEdit("en")
         self.bilingual_edit = QtWidgets.QLineEdit()
-        self.romaji_check = QtWidgets.QCheckBox("Gerar romaji")
-        translation_row.addWidget(QtWidgets.QLabel("Idiomas (vírgula)"))
+        self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
+        translation_row.addWidget(QtWidgets.QLabel("Languages (comma-separated, blank = Japanese only)"))
         translation_row.addWidget(self.lang_edit)
-        translation_row.addWidget(QtWidgets.QLabel("Bilingue"))
+        translation_row.addWidget(QtWidgets.QLabel("Bilingual"))
         translation_row.addWidget(self.bilingual_edit)
         translation_row.addWidget(self.romaji_check)
 
         fmt_row = QtWidgets.QHBoxLayout()
         self.fmt_combo = QtWidgets.QComboBox()
         self.fmt_combo.addItems(["srt", "vtt", "ass"])
-        fmt_row.addWidget(QtWidgets.QLabel("Formato"))
+        fmt_row.addWidget(QtWidgets.QLabel("Format"))
         fmt_row.addWidget(self.fmt_combo)
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
-        self.stage_label = QtWidgets.QLabel("Parado")
+        self.stage_label = QtWidgets.QLabel("Idle")
         self.detail_label = QtWidgets.QLabel("")
 
         progress_box = QtWidgets.QVBoxLayout()
         progress_box.addWidget(self.progress_bar)
-        progress_box.addWidget(QtWidgets.QLabel("Etapa atual"))
+        progress_box.addWidget(QtWidgets.QLabel("Current stage"))
         progress_box.addWidget(self.stage_label)
-        progress_box.addWidget(QtWidgets.QLabel("Detalhe"))
+        progress_box.addWidget(QtWidgets.QLabel("Detail"))
         progress_box.addWidget(self.detail_label)
 
         self.log_view = QtWidgets.QTextEdit()
@@ -109,11 +109,11 @@ class PipelineTab(BaseWidget):
         layout.addLayout(btn_row)
         layout.addWidget(QtWidgets.QLabel("Log"))
         layout.addWidget(self.log_view)
-        layout.addWidget(QtWidgets.QLabel("Arquivos gerados"))
+        layout.addWidget(QtWidgets.QLabel("Generated files"))
         layout.addWidget(self.results_list)
 
     def _choose_source(self):  # pragma: no cover - GUI
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Escolher arquivo")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Choose file")
         if path:
             self.source_edit.setText(path)
             suggestion = default_workdir_for_input(Path(path))
@@ -137,9 +137,9 @@ class PipelineTab(BaseWidget):
         job.bilingual = self.bilingual_edit.text() or None
         job.fmt = self.fmt_combo.currentText()
 
-        self.log_view.append("Iniciando...")
+        self.log_view.append("Starting pipeline...")
         self.progress_bar.setValue(0)
-        self.stage_label.setText("Preparando...")
+        self.stage_label.setText("Preparing...")
         self.detail_label.setText("")
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
@@ -156,12 +156,12 @@ class PipelineTab(BaseWidget):
             self.thread_pool.start(worker)
 
     def _on_failed(self, msg: str):  # pragma: no cover - GUI
-        self.log_view.append(f"Erro: {msg}")
+        self.log_view.append(f"Error: {msg}")
         self._finalize_controls()
 
     def _on_finished(self):  # pragma: no cover - GUI
         self.progress_bar.setValue(100)
-        self.stage_label.setText("Concluído")
+        self.stage_label.setText("Complete")
         self._finalize_controls()
 
     def _finalize_controls(self):  # pragma: no cover - GUI
@@ -171,7 +171,7 @@ class PipelineTab(BaseWidget):
     def _cancel_job(self):  # pragma: no cover - GUI
         if hasattr(self, "_worker"):
             self._worker.cancel()
-        self.log_view.append("Cancelando...")
+        self.log_view.append("Cancelling...")
 
     def _populate_results(self, items: List[Path]):  # pragma: no cover - GUI
         self.results_list.clear()
@@ -190,9 +190,9 @@ class FinalizeTab(BaseWidget):
         self.video_edit = QtWidgets.QLineEdit()
         self.subs_edit = QtWidgets.QLineEdit()
 
-        video_btn = QtWidgets.QPushButton("Escolher vídeo")
+        video_btn = QtWidgets.QPushButton("Choose video")
         video_btn.clicked.connect(self._choose_video)
-        subs_btn = QtWidgets.QPushButton("Escolher legenda")
+        subs_btn = QtWidgets.QPushButton("Choose subtitle")
         subs_btn.clicked.connect(self._choose_subs)
 
         video_row = QtWidgets.QHBoxLayout()
@@ -211,11 +211,11 @@ class FinalizeTab(BaseWidget):
         self.crf_spin.setValue(18)
 
         form = QtWidgets.QFormLayout()
-        form.addRow("Modo", self.mode_combo)
+        form.addRow("Mode", self.mode_combo)
         form.addRow("Codec", self.codec_edit)
         form.addRow("CRF", self.crf_spin)
 
-        self.run_btn = QtWidgets.QPushButton("Rodar")
+        self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.clicked.connect(self._start_job)
         self.log_view = QtWidgets.QTextEdit()
         self.log_view.setReadOnly(True)
@@ -227,12 +227,12 @@ class FinalizeTab(BaseWidget):
         layout.addWidget(self.log_view)
 
     def _choose_video(self):  # pragma: no cover - GUI
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Vídeo")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Video")
         if path:
             self.video_edit.setText(path)
 
     def _choose_subs(self):  # pragma: no cover - GUI
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Legenda")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Subtitles")
         if path:
             self.subs_edit.setText(path)
 
@@ -246,8 +246,8 @@ class FinalizeTab(BaseWidget):
 
         worker = FinalizeWorker(job)
         worker.signals.log.connect(self.log_view.append)
-        worker.signals.failed.connect(lambda msg: self.log_view.append(f"Erro: {msg}"))
-        worker.signals.results.connect(lambda items: self.log_view.append(f"Saída: {items[0]}"))
+        worker.signals.failed.connect(lambda msg: self.log_view.append(f"Error: {msg}"))
+        worker.signals.results.connect(lambda items: self.log_view.append(f"Output: {items[0]}"))
         if self.thread_pool:
             self.thread_pool.start(worker)
 
@@ -256,13 +256,17 @@ class SettingsTab(BaseWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.addWidget(QtWidgets.QLabel("Configure caminhos e defaults no arquivo config.toml em %APPDATA%/jp2subs."))
+        layout.addWidget(
+            QtWidgets.QLabel(
+                "Configure paths and defaults in the config.toml file located at %APPDATA%/jp2subs."
+            )
+        )
 
 
 class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignore[misc]
     def __init__(self):
         if not QtWidgets:
-            raise RuntimeError("PySide6 é necessário para a GUI")
+            raise RuntimeError("PySide6 is required for the GUI")
         super().__init__()
         self.setWindowTitle("jp2subs")
         tabs = QtWidgets.QTabWidget()

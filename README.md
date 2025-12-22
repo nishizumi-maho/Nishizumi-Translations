@@ -1,20 +1,20 @@
 # jp2subs
 
-jp2subs é uma ferramenta CLI pensada para Windows que transforma áudio/vídeo em legendas multilíngues de alta fidelidade para anime e conteúdo japonês. O pipeline cobre ingestão, ASR (faster-whisper), romanização, tradução com LLM ou fluxo draft+postedit, exportação de legendas (SRT/VTT/ASS) e mux/burn com ffmpeg.
+jp2subs is a Windows-friendly CLI/GUI tool that turns Japanese audio/video into high-fidelity multi-language subtitles. The pipeline covers ingestion, ASR (faster-whisper), romanization, LLM translation (or draft + post-edit), subtitle export (SRT/VTT/ASS), and mux/burn with ffmpeg.
 
-## Recursos principais
-- Aceita vídeos (mp4/mkv/webm/etc.) e áudios (flac/mp3/wav/m4a/mka).
-- Extrai áudio com ffmpeg (FLAC 48 kHz, estéreo/mono configurável).
-- Transcrição com `faster-whisper` (temperature=0, VAD opcional, word timestamps quando disponíveis).
-- JSON mestre com segmentos `{id, start, end, ja_raw, romaji, translations{...}}`.
-- Romanização por `pykakasi`.
-- Tradução pluggable: modo `llm` (local `llama.cpp` ou API genérica) e modo `draft+postedit` (esboço NLLB + pós-edição LLM).
-- Exporta SRT/VTT/ASS, suporta bilíngue (ex: JP + PT-BR). Quebra de linha em ~42 caracteres e no máximo 2 linhas.
-- Soft-mux em MKV e hard-burn via ffmpeg+libass.
-- Cache por workdir; não repete etapas se `master.json` já existe.
+## Key features
+- Accepts videos (mp4/mkv/webm/etc.) and audio files (flac/mp3/wav/m4a/mka).
+- Extracts audio with ffmpeg (FLAC 48 kHz, stereo/mono configurable).
+- Transcription via `faster-whisper` (temperature=0, optional VAD, word timestamps when available).
+- Master JSON with segments `{id, start, end, ja_raw, romaji, translations{...}}`.
+- Romanization with `pykakasi`.
+- Pluggable translation: `llm` mode (local `llama.cpp` or generic API) and `draft+postedit` (NLLB draft + LLM post-edit).
+- Exports SRT/VTT/ASS, supports bilingual output (e.g., JP + EN). Line breaks at ~42 characters and max 2 lines.
+- Soft-mux to MKV and hard-burn via ffmpeg + libass.
+- Workdir caching; pipeline skips stages when `master.json` already exists.
 
-## Instalação
-Requisitos: Python 3.11+, ffmpeg disponível no PATH (Windows). Opcional: `faster-whisper` para ASR, `requests` para provider API.
+## Installation
+Requirements: Python 3.11+, ffmpeg on PATH (Windows). Optional: `faster-whisper` for ASR, `requests` for generic API providers.
 
 ```bash
 python -m venv .venv
@@ -22,46 +22,47 @@ python -m venv .venv
 pip install -e .
 # Extras
 pip install jp2subs[asr]     # faster-whisper
-pip install jp2subs[llm]     # requests para API genérica
-pip install jp2subs[gui]     # PySide6 para a interface desktop
+pip install jp2subs[llm]     # requests for generic API
+pip install jp2subs[gui]     # PySide6 for the desktop interface
 ```
 
-Modelos:
-- **faster-whisper**: baixe um modelo (ex: `large-v3`) e deixe o cache padrão (~AppData/Local/whisper).
-- **llama.cpp**: execute `jp2subs deps install-llama` (ou `jp2subs install-llama`) para baixar o release mais recente para
-  `%APPDATA%\\jp2subs\\deps\\llama.cpp\\<tag>` e configurar `translation.llama_binary` em `%APPDATA%\\jp2subs\\config.toml`.
-  Aponte `translation.llama_model` (ou `JP2SUBS_LLAMA_MODEL`) para o seu arquivo `model.gguf`.
-- **NLLB** (rascunho opcional): utilize seu executor preferido offline (hook manual no provider ou pré-processo).
+Models:
+- **faster-whisper**: download a model (e.g., `large-v3`) and keep it in the default cache (~AppData/Local/whisper).
+- **llama.cpp**: run `jp2subs deps install-llama` (or `jp2subs install-llama`) to download the latest release to
+  `%APPDATA%\\jp2subs\\deps\\llama.cpp\\<tag>` and set `translation.llama_binary` in `%APPDATA%\\jp2subs\\config.toml`.
+  Point `translation.llama_model` (or `JP2SUBS_LLAMA_MODEL`) to your `model.gguf` file.
+- **NLLB** (optional draft): use your preferred offline runner (hook provider manually or pre-process).
 
-## Uso rápido
+## Quickstart
 ```bash
-# Interface gráfica
+# GUI
 jp2subs ui
 
-# 1) Ingestão (extrai áudio para workdir)
+# 1) Ingest (extract audio to workdir)
 jp2subs ingest input.mkv --workdir workdir
 
-# 2) Transcrição
+# 2) Transcribe
 jp2subs transcribe workdir/audio.flac --workdir workdir --model-size large-v3
 
-# 3) Romanização
+# 3) Romanize
 jp2subs romanize workdir/master.json --workdir workdir
 
-# 4) Tradução (ex.: pt-BR e en, provider local via llama.cpp)
-jp2subs translate workdir/master.json --to pt-BR --to en --mode llm --provider local --block-size 20
+# 4) Translate (e.g., English, provider via llama.cpp)
+jp2subs translate workdir/master.json --to en --mode llm --provider local --block-size 20
 
-# 5) Exportar legendas bilíngues (JP + PT-BR)
-jp2subs export workdir/master.json --format ass --lang pt-BR --bilingual ja --out workdir/subs_pt-BR.ass
+# 5) Export bilingual subtitles (JP + EN)
+jp2subs export workdir/master.json --format ass --lang en --bilingual ja --out workdir/subs_en.ass
 
-# 6) Gere/edite as legendas e depois escolha o modo secundário
-#    Softcode (mkv/mp4 sem reencode), hardcode (burn-in) ou sidecar (somente copiar)
-jp2subs softcode input.mkv workdir/subs_pt-BR.ass --same-name --container mkv
-jp2subs hardcode input.mkv workdir/subs_pt-BR.ass --same-name --suffix .hard --crf 18
-jp2subs sidecar input.mkv workdir/subs_pt-BR.ass --out-dir releases
+# 6) Apply subtitles (soft-mux, hard-burn, or sidecar)
+jp2subs softcode input.mkv workdir/subs_en.ass --same-name --container mkv
+jp2subs hardcode input.mkv workdir/subs_en.ass --same-name --suffix .hard --crf 18
+jp2subs sidecar input.mkv workdir/subs_en.ass --out-dir releases
 ```
 
-## Gerar executável Windows (.exe)
-Instale PyInstaller e o extra `gui`, depois execute o script PowerShell:
+Tip: leave the translation language field blank in the GUI/wizard to produce Japanese-only transcripts and subtitles without running translation.
+
+## Build a Windows executable (.exe)
+Install PyInstaller and the `gui` extra, then run the PowerShell script:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
@@ -70,55 +71,54 @@ pwsh scripts/build_exe.ps1
 ```
 
 ## Screenshots
-*(adicione suas capturas aqui; placeholders para catálogo)*
+*(add your captures here; placeholders for catalog)*
 
-## Formato do JSON mestre
-Ver [`examples/master.sample.json`](examples/master.sample.json) para um contrato completo:
+## Master JSON format
+See [`examples/master.sample.json`](examples/master.sample.json) for the full contract:
 ```json
 {
   "meta": {"source": "...", "created_at": "...", "tool_versions": {...}, "settings": {...}},
   "segments": [
-    {"id": 1, "start": 12.34, "end": 15.82, "ja_raw": "...", "romaji": "...", "translations": {"pt-BR": "..."}}
+    {"id": 1, "start": 12.34, "end": 15.82, "ja_raw": "...", "romaji": "...", "translations": {"en": "..."}}
   ]
 }
 ```
 
-## Prompts internos (qualidade e fidelidade)
-- **Normalização mínima (opcional)**: preserva tiques, sem reescrever.
-- **Tradução fiel-natural (blocos)**: reforça fidelidade, não inventar conteúdo, manter interjeições e honoríficos; um output por linha.
-- **Pós-edição (draft+postedit)**: melhora tradução rascunho mantendo sentido e tics.
-Os textos completos estão em `src/jp2subs/translation.py`.
+## Built-in prompts (quality and fidelity)
+- **Minimal normalization (optional)**: keep tics, no rewrites.
+- **Faithful-natural translation (blocks)**: prioritize fidelity, avoid inventing content, keep interjections and honorifics; one output per line.
+- **Post-edit (draft+postedit)**: refine a draft translation while preserving intent and vocal tics.
+Full texts live in `src/jp2subs/translation.py`.
 
-## Qualidade das traduções
-- Fidelidade prioritária: sem invenções ou cortes de tics (えっと, あの, うん etc.).
-- Manter repetições e hesitações, nomes próprios e honoríficos salvo glossário.
-- Glossário opcional por JSON (`--glossary`), aplicado pelo provider.
+## Translation quality guidelines
+- Fidelity first: avoid inventing or trimming filler (えっと, あの, うん, etc.).
+- Preserve repetitions/hesitations, proper names, and honorifics unless a glossary overrides them.
+- Optional glossary via JSON (`--glossary`), applied by the provider.
 
-## Estrutura do repositório
-- `src/jp2subs/`: código-fonte (CLI, ASR wrapper, romanização, tradução, exportadores, ffmpeg helpers)
-- `examples/`: `master.sample.json` e dicas de uso
-- `configs/`: espaço para presets (adicione os seus)
-- `.github/workflows/ci.yml`: lint básico e testes
-- `tests/`: testes unitários de schema e writers
+## Repository structure
+- `src/jp2subs/`: source code (CLI, ASR wrapper, romanization, translation, exporters, ffmpeg helpers)
+- `examples/`: `master.sample.json` and usage tips
+- `configs/`: space for presets (add yours)
+- `.github/workflows/ci.yml`: basic lint/tests
+- `tests/`: schema and writer unit tests
 
-## Execução de testes
+## Running tests
 ```bash
 pip install -e .
 pip install pytest
 pytest
 ```
 
-## Modo secundário de legendagem
-- Depois de exportar/editar as legendas, use os comandos dedicados para aplicá-las ao vídeo:
-  - `jp2subs softcode <video> <subs> --same-name --container mkv` para mux (sem reencode, usa mov_text automaticamente para MP4).
-  - `jp2subs hardcode <video> <subs> --suffix .hard --crf 18` para burn-in com libass, respeitando ASS/SRT/VTT.
-  - `jp2subs sidecar <video> <subs> --out-dir player\downloads` para apenas copiar/renomear a legenda, mantendo compatibilidade com players que leem arquivos separados.
+## Subtitle application modes
+- After exporting/editing subtitles, use the dedicated commands to apply them to a video:
+  - `jp2subs softcode <video> <subs> --same-name --container mkv` to mux (no re-encode; uses mov_text automatically for MP4).
+  - `jp2subs hardcode <video> <subs> --suffix .hard --crf 18` to burn-in with libass, respecting ASS/SRT/VTT.
+  - `jp2subs sidecar <video> <subs> --out-dir player\downloads` to copy/rename the subtitle, compatible with players that read external files.
 
+## Suggested roadmap
+- Integrate NLLB directly (onnx/ct2) for draft.
+- Add ASS style presets tuned for anime.
+- Optional richer UI.
 
-## Roadmap sugerido
-- Integrar NLLB direto (onnx/ct2) para draft.
-- Adicionar presets de estilos ASS específicos para anime.
-- UI opcional (futuro).
-
-## Licença
-MIT (ver [LICENSE](LICENSE)).
+## License
+MIT (see [LICENSE](LICENSE)).

@@ -105,7 +105,7 @@ def _create_model_with_fallback(WhisperModel, *, model_size: str, device: Option
             console.print("ASR device: cuda")
             return _build("cuda")
         except Exception as exc:  # noqa: BLE001
-            console.print(f"CUDA não disponível/erro ao inicializar, usando CPU: {exc}")
+            console.print(f"CUDA unavailable or failed to initialize, falling back to CPU: {exc}")
             console.print("ASR device: cpu")
             return _build("cpu")
 

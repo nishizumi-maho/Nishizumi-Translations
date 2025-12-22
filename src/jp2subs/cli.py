@@ -106,7 +106,7 @@ def romanize(master: Path, workdir: Path = typer.Option(Path("workdir"))):
 @app.command()
 def translate(
     master: Path,
-    to: List[str] = typer.Option(..., help="Destination language codes e.g. pt-BR"),
+    to: List[str] = typer.Option(..., help="Destination language codes e.g. en"),
     mode: str = typer.Option("llm", case_sensitive=False),
     provider: str = typer.Option("echo", help="Translation provider: echo|local|api"),
     block_size: int = 20,
@@ -127,7 +127,7 @@ def translate(
 def export(
     master: Path,
     fmt: str = typer.Option("srt", help="Subtitle format: srt|vtt|ass"),
-    lang: str = typer.Option("pt-BR", help="Primary language code"),
+    lang: str = typer.Option("en", help="Primary language code"),
     bilingual: Optional[str] = typer.Option(None, help="Secondary language code e.g. ja"),
     out: Optional[Path] = typer.Option(None, help="Output path; defaults to workdir/subs_<lang>.<fmt>"),
     workdir: Path = typer.Option(Path("workdir")),
@@ -148,7 +148,7 @@ def softcode(
     container: str = typer.Option("mkv", case_sensitive=False, help="Output container mkv|mp4"),
     same_name: bool = typer.Option(False, help="Name output after the video"),
     suffix: str | None = typer.Option(None, help="Optional suffix before extension"),
-    lang: str | None = typer.Option("pt-BR", help="Subtitle language code"),
+    lang: str | None = typer.Option("en", help="Subtitle language code"),
     out: Path | None = typer.Option(None, help="Override output path"),
     verbose: bool = typer.Option(False, help="Show ffmpeg command"),
 ):
@@ -158,10 +158,10 @@ def softcode(
     out_path = video.build_out_path(
         video_path, subtitle, out_dir, same_name, suffix, container, mode="softcode", out=out
     )
-    console.print("[bold]Modo:[/bold] softcode")
-    console.print(f"Vídeo: {video_path}")
-    console.print(f"Legenda: {subtitle}")
-    console.print(f"Saída: {out_path}")
+    console.print("[bold]Mode:[/bold] softcode")
+    console.print(f"Video: {video_path}")
+    console.print(f"Subtitle: {subtitle}")
+    console.print(f"Output: {out_path}")
     result = video.run_ffmpeg_mux_soft(
         video_path, subtitle, out_path, container=container, lang=lang, verbose=verbose
     )
@@ -186,10 +186,10 @@ def hardcode(
     out_path = video.build_out_path(
         video_path, subtitle, out_dir, same_name, suffix, container="mp4", mode="hardcode", out=out
     )
-    console.print("[bold]Modo:[/bold] hardcode")
-    console.print(f"Vídeo: {video_path}")
-    console.print(f"Legenda: {subtitle}")
-    console.print(f"Saída: {out_path}")
+    console.print("[bold]Mode:[/bold] hardcode")
+    console.print(f"Video: {video_path}")
+    console.print(f"Subtitle: {subtitle}")
+    console.print(f"Output: {out_path}")
     result = video.run_ffmpeg_burn(
         video_path,
         subtitle,
@@ -215,10 +215,10 @@ def sidecar(
     out_path = video.build_out_path(
         video_path, subtitle, out_dir, same_name, suffix=None, container=None, mode="sidecar", out=out
     )
-    console.print("[bold]Modo:[/bold] sidecar")
-    console.print(f"Vídeo: {video_path}")
-    console.print(f"Legenda: {subtitle}")
-    console.print(f"Saída: {out_path}")
+    console.print("[bold]Mode:[/bold] sidecar")
+    console.print(f"Video: {video_path}")
+    console.print(f"Subtitle: {subtitle}")
+    console.print(f"Output: {out_path}")
     result = video.copy_sidecar(video_path, subtitle, out_path)
     console.print(f"Sidecar ready at [bold]{result}[/bold]")
 
@@ -272,6 +272,13 @@ def _parse_languages(raw_value: str) -> list[str]:
     return langs
 
 
+def _parse_optional_languages(raw_value: str) -> list[str]:
+    """Allow empty input to skip translation."""
+
+    langs = [lang.strip() for lang in raw_value.split(",") if lang.strip()]
+    return langs
+
+
 def _prompt_choice(label: str, options: dict[str, str], default: str) -> str:
     rendered = " ".join([f"[{key}] {value}" for key, value in options.items()])
     prompt_text = f"{label} {rendered} (default {default})"
@@ -282,7 +289,7 @@ def _prompt_choice(label: str, options: dict[str, str], default: str) -> str:
             answer = default
         if answer in options:
             return answer
-        console.print("[red]Escolha inválida.[/red]")
+        console.print("[red]Invalid choice.[/red]")
 
 
 def _prompt_path(label: str, allow_file: bool = True, allow_dir: bool = False) -> Path:
@@ -304,8 +311,8 @@ def _open_file_picker(allow_dir: bool = False) -> str:
         root = tk.Tk()
         root.withdraw()
         if allow_dir:
-            return fd.askdirectory(title="Escolha uma pasta")
-        return fd.askopenfilename(title="Escolha um arquivo")
+            return fd.askdirectory(title="Choose a folder")
+        return fd.askopenfilename(title="Choose a file")
     except Exception:
         return ""
 
@@ -313,7 +320,7 @@ def _open_file_picker(allow_dir: bool = False) -> str:
 def _doctor_ffmpeg() -> None:
     ffmpeg_path = config.detect_ffmpeg()
     if not ffmpeg_path:
-        raise typer.BadParameter("ffmpeg não encontrado no PATH. Instale ou configure em Settings.")
+        raise typer.BadParameter("ffmpeg not found on PATH. Install it or configure it in Settings.")
 
 
 def _summarize_config(defaults: config.AppConfig | None = None) -> config.AppConfig:
@@ -331,7 +338,7 @@ def _default_workdir(input_path: Path) -> Path:
 def _wizard_impl():
     console.print("[bold]jp2subs Wizard[/bold] — interactive guided run\n")
     cfg = _summarize_config()
-    input_path = _prompt_path("Input media/audio path (Enter abre file picker)")
+    input_path = _prompt_path("Input media/audio path (Enter opens file picker)")
     if not input_path.exists():
         console.print(f"[red]Input path not found:[/red] {input_path}")
         raise typer.Exit(code=1)
@@ -352,12 +359,11 @@ def _wizard_impl():
     romaji_choice = _prompt_choice("Generate romaji?", {"y": "yes", "n": "no"}, "n")
     generate_romaji = romaji_choice == "y"
 
-    langs_raw = Prompt.ask("Translation target languages (comma-separated, e.g., en, pt-BR)")
-    try:
-        target_langs = _parse_languages(langs_raw)
-    except typer.BadParameter as exc:  # pragma: no cover - handled in tests via invoke
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(code=1)
+    langs_raw = Prompt.ask(
+        "Translation target languages (comma-separated, e.g., en). Leave blank for Japanese-only transcript",
+        default=",",
+    )
+    target_langs = _parse_optional_languages(langs_raw)
 
     translation_mode = Prompt.ask("Translation mode", choices=["llm", "draft+postedit"], default=cfg.translation.mode)
     provider = Prompt.ask("Translation provider", choices=["local", "api"], default=cfg.translation.provider)
@@ -411,7 +417,8 @@ def _wizard_impl():
 
     def stage_export(doc: MasterDocument) -> list[Path]:
         exports: list[Path] = []
-        for lang in target_langs:
+        export_langs = target_langs or ["ja"]
+        for lang in export_langs:
             output_path = workdir / f"subs_{lang}.{fmt}"
             subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=bilingual)
             exports.append(output_path)
@@ -434,7 +441,8 @@ def _wizard_impl():
     steps.append(("Transcribe", stage_transcribe))
     if generate_romaji:
         steps.append(("Romanize", stage_romanize))
-    steps.append(("Translate", stage_translate))
+    if target_langs:
+        steps.append(("Translate", stage_translate))
     steps.append(("Export", stage_export))
 
     console.print("\nRunning pipeline...\n")
@@ -474,18 +482,18 @@ def _wizard_impl():
 
 def _finalize_wizard():
     console.print("[bold]Finalize Wizard[/bold] — mux/burn/sidecar\n")
-    video_path = _prompt_path("Vídeo de entrada (Enter abre file picker)")
+    video_path = _prompt_path("Input video (Enter opens file picker)")
     if not video_path.exists():
-        console.print(f"[red]Vídeo não encontrado:[/red] {video_path}")
+        console.print(f"[red]Video not found:[/red] {video_path}")
         raise typer.Exit(code=1)
 
-    subtitle_path = _prompt_path("Legenda (SRT/VTT/ASS)")
+    subtitle_path = _prompt_path("Subtitle (SRT/VTT/ASS)")
     if not subtitle_path.exists():
-        console.print(f"[red]Legenda não encontrada:[/red] {subtitle_path}")
+        console.print(f"[red]Subtitle not found:[/red] {subtitle_path}")
         raise typer.Exit(code=1)
 
-    mode_choice = _prompt_choice("Modo", {"1": "sidecar", "2": "softcode", "3": "hardcode"}, "1")
-    target_dir_input = Prompt.ask("Pasta de saída (Enter = mesma do vídeo)", default="")
+    mode_choice = _prompt_choice("Mode", {"1": "sidecar", "2": "softcode", "3": "hardcode"}, "1")
+    target_dir_input = Prompt.ask("Output folder (Enter = same as video)", default="")
     target_dir = Path(target_dir_input) if target_dir_input else video_path.parent
 
     suffix = None
@@ -505,7 +513,7 @@ def _finalize_wizard():
         out_path = video.build_out_path(video_path, subtitle_path, target_dir, True, suffix, "mp4", mode="hardcode")
         result = video.run_ffmpeg_burn(video_path, subtitle_path, out_path, codec=codec, crf=crf, preset="slow")
 
-    console.print(f"[green]Pronto:[/green] {result}")
+    console.print(f"[green]Done:[/green] {result}")
 
 
 @app.command(name="wizard")
@@ -558,7 +566,7 @@ def ui_cmd():
 @app.command()
 def batch(
     input_dir: Path,
-    to: List[str] = typer.Option(..., help="Destination language codes e.g. pt-BR"),
+    to: List[str] = typer.Option(..., help="Destination language codes e.g. en"),
     ext: str = typer.Option("mp4,mkv,flac", help="Comma-separated list of extensions to process"),
     workdir: Path = typer.Option(Path("workdir")),
     mode: str = typer.Option("llm", case_sensitive=False),

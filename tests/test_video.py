@@ -31,7 +31,7 @@ def test_build_out_path_softcode_same_name_with_suffix():
 
 
 def test_validate_subtitle_format_mp4_rejects_ass():
-    with pytest.raises(ValueError, match="MP4 não suporta ASS; use MKV ou converta"):
+    with pytest.raises(ValueError, match="MP4 does not support ASS; use MKV or convert the subtitles"):
         video.validate_subtitle_format("mp4", "styled.ass")
 
 
@@ -39,12 +39,12 @@ def test_run_ffmpeg_mux_soft_builds_command(monkeypatch):
     captured = _capture_run(monkeypatch)
 
     result = video.run_ffmpeg_mux_soft(
-        "input.mp4", "captions.srt", "out.mp4", container="mp4", lang="pt-BR"
+        "input.mp4", "captions.srt", "out.mp4", container="mp4", lang="en"
     )
 
     assert result == Path("out.mp4")
     assert captured["cmd"][captured["cmd"].index("-c:s") + 1] == "mov_text"
-    assert "language=pt-BR" in captured["cmd"]
+    assert "language=en" in captured["cmd"]
 
 
 def test_run_ffmpeg_burn_uses_ass_filter(monkeypatch):
