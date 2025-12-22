@@ -26,17 +26,29 @@ class PipelineTab(BaseWidget):
         super().__init__(parent)
         self.job = PipelineJob()
         self.thread_pool = QtCore.QThreadPool.globalInstance() if QtCore else None
+        self.pending_jobs: list[PipelineJob] = []
+        self.completed_jobs = 0
+        self.total_jobs = 0
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
 
         file_row = QtWidgets.QHBoxLayout()
-        self.source_edit = QtWidgets.QLineEdit()
-        pick_btn = QtWidgets.QPushButton("Choose file")
+        self.source_list = QtWidgets.QListWidget()
+        self.source_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        pick_btn = QtWidgets.QPushButton("Choose files")
         pick_btn.clicked.connect(self._choose_source)
-        file_row.addWidget(self.source_edit)
-        file_row.addWidget(pick_btn)
+        remove_btn = QtWidgets.QPushButton("Remove selected")
+        remove_btn.clicked.connect(self._remove_selected_sources)
+        clear_btn = QtWidgets.QPushButton("Clear queue")
+        clear_btn.clicked.connect(self._clear_sources)
+        file_btns = QtWidgets.QVBoxLayout()
+        file_btns.addWidget(pick_btn)
+        file_btns.addWidget(remove_btn)
+        file_btns.addWidget(clear_btn)
+        file_row.addWidget(self.source_list)
+        file_row.addLayout(file_btns)
 
         workdir_row = QtWidgets.QHBoxLayout()
         self.workdir_edit = QtWidgets.QLineEdit()
@@ -112,37 +124,88 @@ class PipelineTab(BaseWidget):
         layout.addWidget(QtWidgets.QLabel("Generated files"))
         layout.addWidget(self.results_list)
 
-    def _choose_source(self):  # pragma: no cover - GUI
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Choose file")
-        if path:
-            self.source_edit.setText(path)
-            suggestion = default_workdir_for_input(Path(path))
-            self.workdir_edit.setText(str(suggestion))
-
     def _choose_workdir(self):  # pragma: no cover - GUI
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Workdir")
         if path:
             self.workdir_edit.setText(path)
 
     def _start_job(self):  # pragma: no cover - GUI
-        job = PipelineJob()
-        job.source = Path(self.source_edit.text()) if self.source_edit.text() else None
-        job.workdir = Path(self.workdir_edit.text()) if self.workdir_edit.text() else None
-        job.model_size = self.model_input.text() or "large-v3"
-        job.beam_size = self.beam_slider.value()
-        job.vad = self.vad_check.isChecked()
-        job.mono = self.mono_check.isChecked()
-        job.generate_romaji = self.romaji_check.isChecked()
-        job.languages = [lang.strip() for lang in self.lang_edit.text().split(",") if lang.strip()]
-        job.bilingual = self.bilingual_edit.text() or None
-        job.fmt = self.fmt_combo.currentText()
+        sources = [Path(self.source_list.item(i).text()) for i in range(self.source_list.count())]
+        if not sources:
+            self.log_view.append("No sources selected")
+            return
 
-        self.log_view.append("Starting pipeline...")
+        workdir_text = self.workdir_edit.text()
+        workdir = Path(workdir_text) if workdir_text else None
+
+        self.pending_jobs: list[PipelineJob] = [self._build_job(source, workdir) for source in sources]
+        self.completed_jobs = 0
+        self.total_jobs = len(self.pending_jobs)
+
+        self.log_view.append(f"Queued {self.total_jobs} job(s). Starting...")
         self.progress_bar.setValue(0)
         self.stage_label.setText("Preparing...")
         self.detail_label.setText("")
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
+        self.results_list.clear()
+        self._start_next_job()
+
+    def _on_failed(self, msg: str):  # pragma: no cover - GUI
+        self.log_view.append(f"Error: {msg}")
+        self.pending_jobs = []
+        self._finalize_controls()
+
+    def _on_finished(self):  # pragma: no cover - GUI
+        self.completed_jobs += 1
+        if self.pending_jobs:
+            self._start_next_job()
+        else:
+            self.progress_bar.setValue(100)
+            self.stage_label.setText("Complete")
+            self.log_view.append("All jobs complete")
+            self._finalize_controls()
+
+    def _finalize_controls(self):  # pragma: no cover - GUI
+        self.run_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+
+    def _cancel_job(self):  # pragma: no cover - GUI
+        if hasattr(self, "_worker"):
+            self._worker.cancel()
+        self.pending_jobs = []
+        self.log_view.append("Cancelling queue...")
+
+    def _populate_results(self, items: List[Path]):  # pragma: no cover - GUI
+        for item in items:
+            self.results_list.addItem(str(item))
+
+    def _choose_source(self):  # pragma: no cover - GUI
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(self, "Choose files")
+        for path in paths:
+            if not any(self.source_list.item(i).text() == path for i in range(self.source_list.count())):
+                self.source_list.addItem(path)
+        if paths and not self.workdir_edit.text():
+            suggestion = default_workdir_for_input(Path(paths[0]))
+            self.workdir_edit.setText(str(suggestion))
+
+    def _remove_selected_sources(self):  # pragma: no cover - GUI
+        for item in self.source_list.selectedItems():
+            self.source_list.takeItem(self.source_list.row(item))
+
+    def _clear_sources(self):  # pragma: no cover - GUI
+        self.source_list.clear()
+
+    def _start_next_job(self):  # pragma: no cover - GUI
+        if not self.pending_jobs:
+            return
+        job = self.pending_jobs.pop(0)
+        self.log_view.append(
+            f"Starting job {self.completed_jobs + 1}/{self.total_jobs}: {job.source.name if job.source else 'Unknown'}"
+        )
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("Preparing...")
+        self.detail_label.setText("")
         worker = PipelineWorker(job)
         self._worker = worker
         worker.signals.log.connect(self.log_view.append)
@@ -155,28 +218,19 @@ class PipelineTab(BaseWidget):
         if self.thread_pool:
             self.thread_pool.start(worker)
 
-    def _on_failed(self, msg: str):  # pragma: no cover - GUI
-        self.log_view.append(f"Error: {msg}")
-        self._finalize_controls()
-
-    def _on_finished(self):  # pragma: no cover - GUI
-        self.progress_bar.setValue(100)
-        self.stage_label.setText("Complete")
-        self._finalize_controls()
-
-    def _finalize_controls(self):  # pragma: no cover - GUI
-        self.run_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
-
-    def _cancel_job(self):  # pragma: no cover - GUI
-        if hasattr(self, "_worker"):
-            self._worker.cancel()
-        self.log_view.append("Cancelling...")
-
-    def _populate_results(self, items: List[Path]):  # pragma: no cover - GUI
-        self.results_list.clear()
-        for item in items:
-            self.results_list.addItem(str(item))
+    def _build_job(self, source: Path, workdir: Path | None) -> PipelineJob:
+        job = PipelineJob()
+        job.source = source
+        job.workdir = workdir or default_workdir_for_input(source)
+        job.model_size = self.model_input.text() or "large-v3"
+        job.beam_size = self.beam_slider.value()
+        job.vad = self.vad_check.isChecked()
+        job.mono = self.mono_check.isChecked()
+        job.generate_romaji = self.romaji_check.isChecked()
+        job.languages = [lang.strip() for lang in self.lang_edit.text().split(",") if lang.strip()]
+        job.bilingual = self.bilingual_edit.text() or None
+        job.fmt = self.fmt_combo.currentText()
+        return job
 
 
 class FinalizeTab(BaseWidget):
