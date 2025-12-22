@@ -1,13 +1,14 @@
 """Media ingestion helpers for jp2subs."""
 from __future__ import annotations
-
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Callable
 
 from rich.console import Console
 
 from .io import ensure_workdir
+from .progress import ProgressEvent, stage_percent
 
 console = Console()
 
@@ -23,13 +24,22 @@ def is_video(path: Path) -> bool:
     return path.suffix.lower().lstrip(".") in SUPPORTED_VIDEO
 
 
-def ingest_media(input_path: str | Path, workdir: str | Path, mono: bool = False) -> Path:
+def ingest_media(
+    input_path: str | Path,
+    workdir: str | Path,
+    mono: bool = False,
+    *,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+) -> Path:
     """Copy or extract audio into the working directory.
 
     Returns the path to the extracted audio file (FLAC 48kHz).
     """
 
     ensure_workdir(workdir)
+    if on_progress:
+        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 0), message="Extraindo áudio..."))
     src = Path(input_path)
     if not src.exists():
         raise FileNotFoundError(f"Input {src} not found")
@@ -39,6 +49,8 @@ def ingest_media(input_path: str | Path, workdir: str | Path, mono: bool = False
     if is_audio(src):
         console.log(f"Copying audio to {audio_out}")
         shutil.copy(src, audio_out)
+        if on_progress:
+            on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest concluído"))
         return audio_out
 
     if not is_video(src):
@@ -60,18 +72,32 @@ def ingest_media(input_path: str | Path, workdir: str | Path, mono: bool = False
         "1" if mono else "2",
         str(audio_out),
     ]
-    run_command(cmd, "ffmpeg audio extraction")
+    run_command(cmd, "ffmpeg audio extraction", register_subprocess=register_subprocess)
     console.log(f"Audio extracted to {audio_out} ({channels})")
+    if on_progress:
+        on_progress(ProgressEvent(stage="Ingest", percent=stage_percent("Ingest", 1), message="Ingest concluído"))
     return audio_out
 
 
-def run_command(cmd: list[str], title: str) -> None:
+def run_command(
+    cmd: list[str],
+    title: str,
+    *,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+) -> None:
     """Run a subprocess and raise on failure."""
 
     try:
-        subprocess.run(cmd, check=True)
+        proc = subprocess.Popen(cmd)
+        if register_subprocess:
+            register_subprocess(proc)
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"{title} failed with exit code {proc.returncode}")
     except FileNotFoundError as exc:
         raise RuntimeError(f"{title} failed: binary not found (is it on PATH?)") from exc
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"{title} failed with exit code {exc.returncode}") from exc
+    except RuntimeError:
+        raise
+    except Exception as exc:  # pragma: no cover - unexpected
+        raise RuntimeError(f"{title} failed: {exc}") from exc
 

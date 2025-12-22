@@ -76,18 +76,37 @@ class PipelineTab(BaseWidget):
         fmt_row.addWidget(QtWidgets.QLabel("Formato"))
         fmt_row.addWidget(self.fmt_combo)
 
+        self.progress_bar = QtWidgets.QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.stage_label = QtWidgets.QLabel("Parado")
+        self.detail_label = QtWidgets.QLabel("")
+
+        progress_box = QtWidgets.QVBoxLayout()
+        progress_box.addWidget(self.progress_bar)
+        progress_box.addWidget(QtWidgets.QLabel("Etapa atual"))
+        progress_box.addWidget(self.stage_label)
+        progress_box.addWidget(QtWidgets.QLabel("Detalhe"))
+        progress_box.addWidget(self.detail_label)
+
         self.log_view = QtWidgets.QTextEdit()
         self.log_view.setReadOnly(True)
         self.results_list = QtWidgets.QListWidget()
         self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.clicked.connect(self._start_job)
+        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_job)
 
         layout.addLayout(file_row)
         layout.addLayout(workdir_row)
         layout.addLayout(options_row)
         layout.addLayout(translation_row)
         layout.addLayout(fmt_row)
-        layout.addWidget(self.run_btn)
+        layout.addLayout(progress_box)
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addWidget(self.run_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
         layout.addWidget(QtWidgets.QLabel("Log"))
         layout.addWidget(self.log_view)
         layout.addWidget(QtWidgets.QLabel("Arquivos gerados"))
@@ -119,12 +138,40 @@ class PipelineTab(BaseWidget):
         job.fmt = self.fmt_combo.currentText()
 
         self.log_view.append("Iniciando...")
+        self.progress_bar.setValue(0)
+        self.stage_label.setText("Preparando...")
+        self.detail_label.setText("")
+        self.run_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         worker = PipelineWorker(job)
+        self._worker = worker
         worker.signals.log.connect(self.log_view.append)
-        worker.signals.failed.connect(lambda msg: self.log_view.append(f"Erro: {msg}"))
+        worker.signals.failed.connect(self._on_failed)
         worker.signals.results.connect(self._populate_results)
+        worker.signals.finished.connect(self._on_finished)
+        worker.signals.progress.connect(self.progress_bar.setValue)
+        worker.signals.stage.connect(self.stage_label.setText)
+        worker.signals.detail.connect(self.detail_label.setText)
         if self.thread_pool:
             self.thread_pool.start(worker)
+
+    def _on_failed(self, msg: str):  # pragma: no cover - GUI
+        self.log_view.append(f"Erro: {msg}")
+        self._finalize_controls()
+
+    def _on_finished(self):  # pragma: no cover - GUI
+        self.progress_bar.setValue(100)
+        self.stage_label.setText("Concluído")
+        self._finalize_controls()
+
+    def _finalize_controls(self):  # pragma: no cover - GUI
+        self.run_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+
+    def _cancel_job(self):  # pragma: no cover - GUI
+        if hasattr(self, "_worker"):
+            self._worker.cancel()
+        self.log_view.append("Cancelando...")
 
     def _populate_results(self, items: List[Path]):  # pragma: no cover - GUI
         self.results_list.clear()

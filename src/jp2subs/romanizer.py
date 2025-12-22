@@ -1,14 +1,19 @@
 """Romanization utilities using pykakasi."""
 from __future__ import annotations
 
-from typing import List
+from typing import Callable, List
 
 from pykakasi import kakasi
 
 from .models import MasterDocument
+from .progress import ProgressEvent, stage_percent
 
 
-def romanize_segments(doc: MasterDocument) -> MasterDocument:
+def romanize_segments(
+    doc: MasterDocument,
+    *,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
+) -> MasterDocument:
     converter = kakasi()
     converter.setMode("H", "a")
     converter.setMode("K", "a")
@@ -20,5 +25,7 @@ def romanize_segments(doc: MasterDocument) -> MasterDocument:
         romaji = conv.do(seg.ja_raw)
         romaji_list.append(romaji)
     doc.add_romaji(romaji_list)
+    if on_progress:
+        on_progress(ProgressEvent(stage="Romanize", percent=stage_percent("Romanize", 1), message="Romanização concluída"))
     return doc
 

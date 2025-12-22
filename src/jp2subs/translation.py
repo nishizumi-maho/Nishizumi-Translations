@@ -5,11 +5,12 @@ import os
 import shlex
 import subprocess
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Sequence
+from typing import Callable, Dict, Iterable, List, Sequence
 
 from rich.console import Console
 
 from .models import MasterDocument
+from .progress import ProgressEvent, stage_percent
 
 console = Console()
 
@@ -44,7 +45,14 @@ class TranslationProvider:
     """Base class for pluggable translation providers."""
 
     def translate_block(
-        self, lines: Sequence[str], source_lang: str, target_lang: str, glossary: Dict[str, str] | None = None
+        self,
+        lines: Sequence[str],
+        source_lang: str,
+        target_lang: str,
+        glossary: Dict[str, str] | None = None,
+        *,
+        register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+        check_cancelled: Callable[[], bool] | None = None,
     ) -> List[str]:
         raise NotImplementedError
 
@@ -54,7 +62,14 @@ class EchoProvider(TranslationProvider):
     """Fallback provider that returns the source text."""
 
     def translate_block(
-        self, lines: Sequence[str], source_lang: str, target_lang: str, glossary: Dict[str, str] | None = None
+        self,
+        lines: Sequence[str],
+        source_lang: str,
+        target_lang: str,
+        glossary: Dict[str, str] | None = None,
+        *,
+        register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+        check_cancelled: Callable[[], bool] | None = None,
     ) -> List[str]:
         return list(lines)
 
@@ -65,7 +80,14 @@ class LocalLlamaCPPProvider(TranslationProvider):
     model_path: str
 
     def translate_block(
-        self, lines: Sequence[str], source_lang: str, target_lang: str, glossary: Dict[str, str] | None = None
+        self,
+        lines: Sequence[str],
+        source_lang: str,
+        target_lang: str,
+        glossary: Dict[str, str] | None = None,
+        *,
+        register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+        check_cancelled: Callable[[], bool] | None = None,
     ) -> List[str]:  # pragma: no cover - relies on external binary
         prompt = TRANSLATION_PROMPT.format(target_lang=target_lang)
         glossary_hint = "\n".join(f"{k} -> {v}" for k, v in (glossary or {}).items())
@@ -87,8 +109,27 @@ class LocalLlamaCPPProvider(TranslationProvider):
 
         llama_args = shlex.split(os.getenv("JP2SUBS_LLAMA_ARGS", ""))
         cmd = [self.binary_path, "-m", self.model_path, *llama_args, "-p", full_prompt]
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        output_lines = _parse_llama_output(result.stdout.splitlines(), len(lines))
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if register_subprocess:
+            register_subprocess(proc)
+        stdout_chunks: list[str] = []
+        while True:
+            try:
+                stdout, _ = proc.communicate(timeout=0.5)
+                stdout_chunks.append(stdout)
+                break
+            except subprocess.TimeoutExpired:
+                if check_cancelled and check_cancelled():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise RuntimeError("Job cancelado")
+                continue
+        if proc.returncode != 0:
+            raise RuntimeError(f"llama.cpp exited with code {proc.returncode}")
+        output_lines = _parse_llama_output("".join(stdout_chunks).splitlines(), len(lines))
         return output_lines
 
 
@@ -98,7 +139,14 @@ class GenericAPIProvider(TranslationProvider):
     api_key: str | None = None
 
     def translate_block(
-        self, lines: Sequence[str], source_lang: str, target_lang: str, glossary: Dict[str, str] | None = None
+        self,
+        lines: Sequence[str],
+        source_lang: str,
+        target_lang: str,
+        glossary: Dict[str, str] | None = None,
+        *,
+        register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+        check_cancelled: Callable[[], bool] | None = None,
     ) -> List[str]:  # pragma: no cover - network
         import requests
 
@@ -145,12 +193,31 @@ def translate_document(
     provider: str = "echo",
     block_size: int = 20,
     glossary: Dict[str, str] | None = None,
+    *,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> MasterDocument:
     provider_impl = _provider_from_name(provider)
+    langs = list(target_langs)
+    total_blocks = sum((len(doc.segments) + block_size - 1) // block_size for _ in langs)
+    completed_blocks = 0
 
-    for lang in target_langs:
+    for lang in langs:
         console.log(f"Translating to {lang} using mode={mode} provider={provider}...")
-        _translate_lang(doc, lang, provider_impl, block_size, glossary, mode)
+        completed_blocks = _translate_lang(
+            doc,
+            lang,
+            provider_impl,
+            block_size,
+            glossary,
+            mode,
+            total_blocks,
+            completed_blocks,
+            on_progress=on_progress,
+            is_cancelled=is_cancelled,
+            register_subprocess=register_subprocess,
+        )
     return doc
 
 
@@ -161,18 +228,52 @@ def _translate_lang(
     block_size: int,
     glossary: Dict[str, str] | None,
     mode: str,
-) -> None:
+    total_blocks: int,
+    completed_blocks: int,
+    *,
+    on_progress: Callable[[ProgressEvent], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
+) -> int:
     doc.ensure_translation_key(target_lang)
 
-    for start in range(0, len(doc.segments), block_size):
+    for block_index, start in enumerate(range(0, len(doc.segments), block_size), start=1):
+        if is_cancelled and is_cancelled():
+            raise RuntimeError("Job cancelado")
         block = doc.segments[start : start + block_size]
         source_lines = [seg.ja_raw for seg in block]
-        draft = provider_impl.translate_block(source_lines, "ja", target_lang, glossary)
+        draft = provider_impl.translate_block(
+            source_lines,
+            "ja",
+            target_lang,
+            glossary,
+            register_subprocess=register_subprocess,
+            check_cancelled=is_cancelled,
+        )
         if mode.lower() == "draft+postedit":
             # Re-run on the draft to allow LLM post-editing while preserving fidelity.
-            draft = provider_impl.translate_block(draft, "ja", target_lang, glossary)
+            draft = provider_impl.translate_block(
+                draft,
+                "ja",
+                target_lang,
+                glossary,
+                register_subprocess=register_subprocess,
+                check_cancelled=is_cancelled,
+            )
         for seg, text in zip(block, draft):
             seg.translations[target_lang] = text
+        completed_blocks += 1
+        if on_progress:
+            percent = stage_percent("Translate", completed_blocks / max(1, total_blocks))
+            detail = f"Bloco {block_index}/{(len(doc.segments) + block_size - 1) // block_size} ({target_lang})"
+            translated_count = start + len(block)
+            detail += f" | Segmentos traduzidos {translated_count}/{len(doc.segments)}"
+            on_progress(
+                ProgressEvent(stage="Translate", percent=percent, message="Traduzindo...", detail=detail)
+            )
+    if on_progress:
+        on_progress(ProgressEvent(stage="Translate", percent=stage_percent("Translate", 1), message="Tradução concluída"))
+    return completed_blocks
 
 
 def _provider_from_name(name: str) -> TranslationProvider:
