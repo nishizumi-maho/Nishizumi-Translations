@@ -4,6 +4,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
@@ -312,6 +315,22 @@ def _doctor_ffmpeg() -> None:
         raise typer.BadParameter("ffmpeg not found on PATH. Install it or configure it in Settings.")
 
 
+def _open_in_file_manager(path: Path) -> None:
+    target = Path(path).resolve()
+    if not target.exists():
+        console.print(f"[red]Workdir not found:[/red] {target}")
+        return
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(target)  # type: ignore[attr-defined]
+        elif sys.platform.startswith("darwin"):
+            subprocess.run(["open", str(target)], check=False)
+        else:
+            subprocess.run(["xdg-open", str(target)], check=False)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Could not open workdir:[/red] {exc}")
+
+
 def _summarize_config(defaults: config.AppConfig | None = None) -> config.AppConfig:
     cfg = defaults or config.load_config()
     detected_ffmpeg = config.detect_ffmpeg(cfg.ffmpeg_path)
@@ -324,7 +343,7 @@ def _default_workdir(input_path: Path) -> Path:
     return Path("workdir") / input_path.stem
 
 
-def _wizard_impl():
+def _wizard_impl(open_workdir: bool = False):
     console.print("[bold]jp2subs Wizard[/bold] — interactive guided run\n")
     cfg = _summarize_config()
     input_path = _prompt_path("Input media/audio path (Enter opens file picker)")
@@ -449,6 +468,9 @@ def _wizard_impl():
     for path in generated_paths:
         console.print(f"- {path}")
 
+    if open_workdir:
+        _open_in_file_manager(workdir)
+
 
 def _finalize_wizard():
     console.print("[bold]Finalize Wizard[/bold] — mux/burn/sidecar\n")
@@ -487,24 +509,36 @@ def _finalize_wizard():
 
 
 @app.command(name="wizard")
-def wizard_cmd():
+def wizard_cmd(
+    open_workdir: bool = typer.Option(
+        False, "--open-workdir", help="Open the workdir folder in the file explorer after completion"
+    )
+):
     """Run the interactive jp2subs wizard."""
 
-    _wizard_impl()
+    _wizard_impl(open_workdir=open_workdir)
 
 
 @app.command(name="menu")
-def menu_cmd():
+def menu_cmd(
+    open_workdir: bool = typer.Option(
+        False, "--open-workdir", help="Open the workdir folder in the file explorer after completion"
+    )
+):
     """Alias for the interactive wizard."""
 
-    _wizard_impl()
+    _wizard_impl(open_workdir=open_workdir)
 
 
 @app.command(name="w")
-def wizard_shortcut():
+def wizard_shortcut(
+    open_workdir: bool = typer.Option(
+        False, "--open-workdir", help="Open the workdir folder in the file explorer after completion"
+    )
+):
     """Shortcut for wizard."""
 
-    _wizard_impl()
+    _wizard_impl(open_workdir=open_workdir)
 
 
 @app.command(name="finalize")
