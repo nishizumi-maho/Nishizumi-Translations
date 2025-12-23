@@ -1,6 +1,7 @@
 """Shared pipeline runner for CLI and GUI."""
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
@@ -55,10 +56,14 @@ class PipelineRunner:
             )
             master_path = workdir / "master.json"
             io_mod.save_master(doc, master_path)
+            outputs.extend(self._write_transcripts(doc, workdir, prefix="transcript_ja", lang="ja"))
 
             if job.generate_romaji:
                 doc = self._stage("Romanize", lambda: romanizer.romanize_segments(doc, on_progress=self._emit_progress))
                 io_mod.save_master(doc, master_path)
+                outputs.extend(
+                    self._write_transcripts(doc, workdir, prefix="transcript_romaji", lang="ja", use_romaji=True)
+                )
 
             outputs.extend(
                 self._stage(
@@ -128,6 +133,31 @@ class PipelineRunner:
             ProgressEvent(stage="Export", percent=self._stage_percent("Export", 1), message="Export complete")
         )
         return subtitles_root
+
+    def _write_transcripts(self, doc, workdir: Path, *, prefix: str, lang: str, use_romaji: bool = False) -> List[Path]:
+        workdir.mkdir(parents=True, exist_ok=True)
+        text_path = workdir / f"{prefix}.txt"
+        srt_path = workdir / f"{prefix}.srt"
+
+        lines = []
+        payload_segments = []
+        for seg in doc.segments:
+            if use_romaji and seg.romaji:
+                lines.append(seg.romaji)
+                seg_copy = copy.deepcopy(seg)
+                seg_copy.translations = {lang: seg.romaji}
+                payload_segments.append(seg_copy)
+            elif lang == "ja":
+                lines.append(seg.ja_raw)
+                payload_segments.append(seg)
+            else:
+                lines.append(seg.translations.get(lang, ""))
+                payload_segments.append(seg)
+
+        text_path.write_text("\n".join(lines), encoding="utf-8")
+        srt_content = subtitles.render_srt(payload_segments, lang, None)
+        srt_path.write_text(srt_content, encoding="utf-8")
+        return [text_path, srt_path]
 
     def _stage(self, name: str, fn):
         if self.callbacks.on_stage_start:
