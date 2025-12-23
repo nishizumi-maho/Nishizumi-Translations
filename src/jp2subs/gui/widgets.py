@@ -14,6 +14,18 @@ except Exception:  # pragma: no cover - allow import without Qt
     QtCore = QtGui = QtWidgets = None  # type: ignore
 
 
+def parse_extra_args(raw: str) -> dict[str, str] | None:
+    """Parse key=value pairs into a mapping."""
+
+    parts = [token.strip() for token in raw.replace("\n", " ").split(" ") if token.strip()]
+    payload: dict[str, str] = {}
+    for token in parts:
+        if "=" in token:
+            key, value = token.split("=", 1)
+            payload[key.strip()] = value.strip()
+    return payload or None
+
+
 class BaseWidget(QtWidgets.QWidget if QtWidgets else object):  # type: ignore[misc]
     def __init__(self, *args, **kwargs):
         if not QtWidgets:
@@ -76,59 +88,18 @@ class PipelineTab(BaseWidget):
         workdir_row.addWidget(self.workdir_edit)
         workdir_row.addWidget(workdir_btn)
 
-        form = QtWidgets.QFormLayout()
-        self.model_input = QtWidgets.QLineEdit("large-v3")
-        self.beam_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.beam_slider.setRange(1, 10)
-        self.beam_slider.setValue(5)
-        self.vad_check = QtWidgets.QCheckBox("VAD")
-        self.vad_check.setChecked(True)
-        self.mono_check = QtWidgets.QCheckBox("Mono")
+        self.defaults_summary = QtWidgets.QLabel("")
+        self.defaults_summary.setWordWrap(True)
         self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
-        self.fmt_combo = QtWidgets.QComboBox()
-        self.fmt_combo.addItems(["srt", "vtt", "ass"])
-        form.addRow("Model", self.model_input)
-        form.addRow("Beam size", self.beam_slider)
-        form.addRow("Voice activity detection", self.vad_check)
-        form.addRow("Force mono", self.mono_check)
-        notice = QtWidgets.QLabel(
-            "Translation is disabled. Use a local LLM, DeepL, or ChatGPT to translate transcripts manually."
+        options_box = QtWidgets.QGroupBox("Job options")
+        options_layout = QtWidgets.QVBoxLayout()
+        options_layout.addWidget(self.romaji_check)
+        advanced_notice = QtWidgets.QLabel(
+            "ASR settings come from the Settings tab. Update them there to change defaults."
         )
-        notice.setWordWrap(True)
-        form.addRow("Translation", notice)
-        form.addRow("Generate romaji", self.romaji_check)
-        form.addRow("Subtitle format", self.fmt_combo)
-
-        advanced_box = QtWidgets.QGroupBox("Advanced ASR")
-        advanced_form = QtWidgets.QFormLayout()
-        self.best_of_spin = QtWidgets.QSpinBox()
-        self.best_of_spin.setRange(0, 10)
-        self.best_of_spin.setValue(0)
-        self.patience_spin = QtWidgets.QDoubleSpinBox()
-        self.patience_spin.setRange(0.0, 10.0)
-        self.patience_spin.setDecimals(2)
-        self.patience_spin.setValue(0.0)
-        self.length_penalty_spin = QtWidgets.QDoubleSpinBox()
-        self.length_penalty_spin.setRange(-5.0, 5.0)
-        self.length_penalty_spin.setDecimals(2)
-        self.length_penalty_spin.setValue(0.0)
-        self.word_ts_check = QtWidgets.QCheckBox("Word timestamps")
-        self.word_ts_check.setChecked(True)
-        self.thread_spin = QtWidgets.QSpinBox()
-        self.thread_spin.setRange(0, 64)
-        self.thread_spin.setValue(0)
-        self.compute_combo = QtWidgets.QComboBox()
-        self.compute_combo.addItems(["default", "float16", "int8", "int8_float16"])
-        self.extra_args_edit = QtWidgets.QPlainTextEdit()
-        self.extra_args_edit.setPlaceholderText("key=value pairs, one line or space separated")
-        advanced_form.addRow("Best of (0=auto)", self.best_of_spin)
-        advanced_form.addRow("Patience", self.patience_spin)
-        advanced_form.addRow("Length penalty", self.length_penalty_spin)
-        advanced_form.addRow("Word timestamps", self.word_ts_check)
-        advanced_form.addRow("Threads (0=auto)", self.thread_spin)
-        advanced_form.addRow("Compute type", self.compute_combo)
-        advanced_form.addRow("Extra ASR args", self.extra_args_edit)
-        advanced_box.setLayout(advanced_form)
+        advanced_notice.setWordWrap(True)
+        options_layout.addWidget(advanced_notice)
+        options_box.setLayout(options_layout)
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -152,10 +123,10 @@ class PipelineTab(BaseWidget):
         self.cancel_btn.clicked.connect(self._cancel_job)
 
         main_area.addLayout(defaults_row)
+        main_area.addWidget(self.defaults_summary)
         main_area.addLayout(file_row)
         main_area.addLayout(workdir_row)
-        main_area.addLayout(form)
-        main_area.addWidget(advanced_box)
+        main_area.addWidget(options_box)
         main_area.addLayout(progress_box)
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addWidget(self.run_btn)
@@ -270,20 +241,21 @@ class PipelineTab(BaseWidget):
         job = PipelineJob()
         job.source = source
         job.workdir = workdir or default_workdir_for_input(source)
-        job.model_size = self.model_input.text() or "large-v3"
-        job.beam_size = self.beam_slider.value()
-        job.vad = self.vad_check.isChecked()
-        job.mono = self.mono_check.isChecked()
+        self.cfg = load_app_state()
+        defaults = self.cfg.defaults
+        job.model_size = defaults.model_size
+        job.beam_size = defaults.beam_size
+        job.vad = defaults.vad
+        job.mono = defaults.mono
         job.generate_romaji = self.romaji_check.isChecked()
-        job.fmt = self.fmt_combo.currentText()
-        job.best_of = self.best_of_spin.value() or None
-        job.patience = self.patience_spin.value() or None
-        job.length_penalty = self.length_penalty_spin.value() or None
-        job.word_timestamps = self.word_ts_check.isChecked()
-        job.threads = self.thread_spin.value() or None
-        compute_type = self.compute_combo.currentText()
-        job.compute_type = None if compute_type == "default" else compute_type
-        job.extra_asr_args = self._parse_extra_args(self.extra_args_edit.toPlainText())
+        job.fmt = defaults.subtitle_format
+        job.best_of = defaults.best_of
+        job.patience = defaults.patience
+        job.length_penalty = defaults.length_penalty
+        job.word_timestamps = defaults.word_timestamps
+        job.threads = defaults.threads
+        job.compute_type = defaults.compute_type
+        job.extra_asr_args = defaults.extra_asr_args
         return job
 
     def _reset_stage_list(self):  # pragma: no cover - GUI
@@ -302,26 +274,36 @@ class PipelineTab(BaseWidget):
     def _on_stage_done(self, name: str):  # pragma: no cover - GUI
         self.stage_list.mark_done(name)
 
-    def _parse_extra_args(self, raw: str) -> dict | None:
-        parts = [token.strip() for token in raw.replace("\n", " ").split(" ") if token.strip()]
-        payload: dict[str, str] = {}
-        for token in parts:
-            if "=" in token:
-                key, value = token.split("=", 1)
-                payload[key.strip()] = value.strip()
-        return payload or None
-
     def _sync_from_cfg(self):
         """Mirror saved defaults into the pipeline form."""
         self.cfg = load_app_state()
         defaults = self.cfg.defaults
-        self.model_input.setText(defaults.model_size)
-        self.beam_slider.setValue(defaults.beam_size)
-        self.vad_check.setChecked(defaults.vad)
-        self.mono_check.setChecked(defaults.mono)
-        fmt_idx = self.fmt_combo.findText(defaults.subtitle_format)
-        if fmt_idx >= 0:
-            self.fmt_combo.setCurrentIndex(fmt_idx)
+        summary = [
+            f"Model: {defaults.model_size}",
+            f"Beam size: {defaults.beam_size}",
+            f"VAD: {'on' if defaults.vad else 'off'}",
+            f"Mono: {'on' if defaults.mono else 'off'}",
+            f"Subtitle format: {defaults.subtitle_format}",
+        ]
+        advanced = []
+        if defaults.best_of is not None:
+            advanced.append(f"Best of: {defaults.best_of if defaults.best_of > 0 else 'auto'}")
+        if defaults.patience is not None:
+            advanced.append(f"Patience: {defaults.patience}")
+        if defaults.length_penalty is not None:
+            advanced.append(f"Length penalty: {defaults.length_penalty}")
+        advanced.append(f"Word timestamps: {'on' if defaults.word_timestamps else 'off'}")
+        if defaults.threads:
+            advanced.append(f"Threads: {defaults.threads}")
+        if defaults.compute_type:
+            advanced.append(f"Compute: {defaults.compute_type}")
+        if defaults.extra_asr_args:
+            formatted = ", ".join(f"{k}={v}" for k, v in defaults.extra_asr_args.items())
+            advanced.append(f"Extra args: {formatted}")
+
+        summary_text = "Using Settings defaults: " + " • ".join(summary + advanced)
+        self.defaults_summary.setText(summary_text)
+        self.romaji_check.setChecked(False)
 
 
 class FinalizeTab(BaseWidget):
@@ -426,6 +408,31 @@ class SettingsTab(BaseWidget):
         if idx >= 0:
             self.subtitle_fmt_combo.setCurrentIndex(idx)
 
+        self.best_of_spin = QtWidgets.QSpinBox()
+        self.best_of_spin.setRange(0, 10)
+        self.best_of_spin.setValue(self.cfg.defaults.best_of or 0)
+        self.patience_spin = QtWidgets.QDoubleSpinBox()
+        self.patience_spin.setRange(0.0, 10.0)
+        self.patience_spin.setDecimals(2)
+        self.patience_spin.setValue(self.cfg.defaults.patience or 0.0)
+        self.length_penalty_spin = QtWidgets.QDoubleSpinBox()
+        self.length_penalty_spin.setRange(-5.0, 5.0)
+        self.length_penalty_spin.setDecimals(2)
+        self.length_penalty_spin.setValue(self.cfg.defaults.length_penalty or 0.0)
+        self.word_ts_check = QtWidgets.QCheckBox()
+        self.word_ts_check.setChecked(self.cfg.defaults.word_timestamps)
+        self.thread_spin = QtWidgets.QSpinBox()
+        self.thread_spin.setRange(0, 64)
+        self.thread_spin.setValue(self.cfg.defaults.threads or 0)
+        self.compute_combo = QtWidgets.QComboBox()
+        self.compute_combo.addItems(["default", "float16", "int8", "int8_float16"])
+        compute_idx = self.compute_combo.findText(self.cfg.defaults.compute_type or "default")
+        if compute_idx >= 0:
+            self.compute_combo.setCurrentIndex(compute_idx)
+        self.extra_args_edit = QtWidgets.QPlainTextEdit()
+        self.extra_args_edit.setPlaceholderText("key=value pairs, one line or space separated")
+        self.extra_args_edit.setPlainText(self._format_extra_args(self.cfg.defaults.extra_asr_args))
+
         form.addRow("Model size", self.model_size_edit)
         form.addRow("Beam size", self.beam_size_spin)
         form.addRow("VAD", self.vad_check)
@@ -436,6 +443,17 @@ class SettingsTab(BaseWidget):
         )
         translation_notice.setWordWrap(True)
         form.addRow("Translation", translation_notice)
+        advanced_box = QtWidgets.QGroupBox("Advanced ASR")
+        advanced_form = QtWidgets.QFormLayout()
+        advanced_form.addRow("Best of (0=auto)", self.best_of_spin)
+        advanced_form.addRow("Patience", self.patience_spin)
+        advanced_form.addRow("Length penalty", self.length_penalty_spin)
+        advanced_form.addRow("Word timestamps", self.word_ts_check)
+        advanced_form.addRow("Threads (0=auto)", self.thread_spin)
+        advanced_form.addRow("Compute type", self.compute_combo)
+        advanced_form.addRow("Extra ASR args", self.extra_args_edit)
+        advanced_box.setLayout(advanced_form)
+        form.addRow(advanced_box)
         defaults_help = QtWidgets.QLabel(
             "These values set the defaults applied to new pipeline jobs."
         )
@@ -472,6 +490,14 @@ class SettingsTab(BaseWidget):
         self.cfg.defaults.vad = self.vad_check.isChecked()
         self.cfg.defaults.mono = self.mono_check.isChecked()
         self.cfg.defaults.subtitle_format = self.subtitle_fmt_combo.currentText()
+        self.cfg.defaults.best_of = self.best_of_spin.value() or None
+        self.cfg.defaults.patience = self.patience_spin.value() or None
+        self.cfg.defaults.length_penalty = self.length_penalty_spin.value() or None
+        self.cfg.defaults.word_timestamps = self.word_ts_check.isChecked()
+        self.cfg.defaults.threads = self.thread_spin.value() or None
+        compute_type = self.compute_combo.currentText()
+        self.cfg.defaults.compute_type = None if compute_type == "default" else compute_type
+        self.cfg.defaults.extra_asr_args = parse_extra_args(self.extra_args_edit.toPlainText())
         persist_app_state(self.cfg)
 
     def _load(self):
@@ -498,6 +524,20 @@ class SettingsTab(BaseWidget):
         idx = self.subtitle_fmt_combo.findText(self.cfg.defaults.subtitle_format)
         if idx >= 0:
             self.subtitle_fmt_combo.setCurrentIndex(idx)
+        self.best_of_spin.setValue(self.cfg.defaults.best_of or 0)
+        self.patience_spin.setValue(self.cfg.defaults.patience or 0.0)
+        self.length_penalty_spin.setValue(self.cfg.defaults.length_penalty or 0.0)
+        self.word_ts_check.setChecked(self.cfg.defaults.word_timestamps)
+        self.thread_spin.setValue(self.cfg.defaults.threads or 0)
+        compute_idx = self.compute_combo.findText(self.cfg.defaults.compute_type or "default")
+        if compute_idx >= 0:
+            self.compute_combo.setCurrentIndex(compute_idx)
+        self.extra_args_edit.setPlainText(self._format_extra_args(self.cfg.defaults.extra_asr_args))
+
+    def _format_extra_args(self, extra_args: dict[str, str] | None) -> str:
+        if not extra_args:
+            return ""
+        return "\n".join(f"{key}={value}" for key, value in extra_args.items())
 
 
 class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignore[misc]

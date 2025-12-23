@@ -49,6 +49,13 @@ class DefaultsConfig:
     vad: bool = True
     mono: bool = False
     subtitle_format: str = "srt"
+    best_of: int | None = None
+    patience: float | None = None
+    length_penalty: float | None = None
+    word_timestamps: bool = True
+    threads: int | None = None
+    compute_type: str | None = None
+    extra_asr_args: dict[str, str] | None = None
 
 
 @dataclass
@@ -133,11 +140,18 @@ def _to_toml(data: Dict[str, Any]) -> str:
 
     lines.append("\n[defaults]")
     for key, value in defaults.items():
+        if value is None:
+            continue
         if isinstance(value, bool):
             literal = "true" if value else "false"
             lines.append(f"{key} = {literal}")
         elif isinstance(value, int):
             lines.append(f"{key} = {value}")
+        elif isinstance(value, float):
+            lines.append(f"{key} = {value}")
+        elif isinstance(value, dict):
+            inner = ", ".join(f"{inner_key} = \"{inner_val}\"" for inner_key, inner_val in value.items())
+            lines.append(f"{key} = {{{inner}}}")
         else:
             lines.append(f"{key} = \"{value}\"")
 
