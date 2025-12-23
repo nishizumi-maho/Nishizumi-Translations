@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -116,7 +117,20 @@ def save_config(config: AppConfig, path: Path | None = None) -> Path:
 def _parse_toml(raw: str) -> Dict[str, Any]:
     import tomllib
 
-    return tomllib.loads(raw)
+    try:
+        return tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        ffmpeg_match = re.search(r"^(ffmpeg_path\s*=\s*)\"([^\"]+)\"", raw, flags=re.MULTILINE)
+        if not ffmpeg_match:
+            raise
+
+        escaped_path = ffmpeg_match.group(2).replace("\\", "\\\\")
+        sanitized = raw[: ffmpeg_match.start(2)] + escaped_path + raw[ffmpeg_match.end(2) :]
+
+        try:
+            return tomllib.loads(sanitized)
+        except tomllib.TOMLDecodeError:
+            raise exc
 
 
 def _to_toml(data: Dict[str, Any]) -> str:
@@ -125,7 +139,7 @@ def _to_toml(data: Dict[str, Any]) -> str:
     lines: list[str] = []
     ffmpeg_path = data.get("ffmpeg_path")
     if ffmpeg_path:
-        lines.append(f"ffmpeg_path = \"{ffmpeg_path}\"")
+        lines.append(f"ffmpeg_path = \"{_escape_basic_string(ffmpeg_path)}\"")
 
     translation = data.get("translation", {})
     defaults = data.get("defaults", {})
@@ -133,10 +147,10 @@ def _to_toml(data: Dict[str, Any]) -> str:
     lines.append("[translation]")
     for key, value in translation.items():
         if isinstance(value, list):
-            serialized = ", ".join(f"\"{item}\"" for item in value)
+            serialized = ", ".join(f"\"{_escape_basic_string(item)}\"" for item in value)
             lines.append(f"{key} = [{serialized}]")
         elif value is not None:
-            lines.append(f"{key} = \"{value}\"")
+            lines.append(f"{key} = \"{_escape_basic_string(value)}\"")
 
     lines.append("\n[defaults]")
     for key, value in defaults.items():
@@ -150,10 +164,18 @@ def _to_toml(data: Dict[str, Any]) -> str:
         elif isinstance(value, float):
             lines.append(f"{key} = {value}")
         elif isinstance(value, dict):
-            inner = ", ".join(f"{inner_key} = \"{inner_val}\"" for inner_key, inner_val in value.items())
+            inner = ", ".join(
+                f"{inner_key} = \"{_escape_basic_string(inner_val)}\"" for inner_key, inner_val in value.items()
+            )
             lines.append(f"{key} = {{{inner}}}")
         else:
-            lines.append(f"{key} = \"{value}\"")
+            lines.append(f"{key} = \"{_escape_basic_string(value)}\"")
 
     return "\n".join(lines) + "\n"
+
+
+def _escape_basic_string(value: str) -> str:
+    """Escape backslashes and quotes for TOML basic strings."""
+
+    return value.replace("\\", "\\\\").replace("\"", "\\\"")
 
