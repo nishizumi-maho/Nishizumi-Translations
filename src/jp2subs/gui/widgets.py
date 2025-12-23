@@ -52,17 +52,9 @@ class PipelineTab(BaseWidget):
         body.addWidget(self.stage_list, 1)
 
         main_area = QtWidgets.QVBoxLayout()
-        defaults_hint = QtWidgets.QLabel(
-            "Job options respect your global defaults from the Settings tab. "
-            "Use the button below to re-apply them at any time."
-        )
-        defaults_hint.setWordWrap(True)
-
         defaults_row = QtWidgets.QHBoxLayout()
-        defaults_row.addWidget(defaults_hint)
-        self.defaults_btn = QtWidgets.QPushButton("Load defaults from Settings")
+        self.defaults_btn = QtWidgets.QPushButton("Load defaults")
         self.defaults_btn.clicked.connect(self._sync_from_cfg)
-        defaults_row.addStretch(1)
         defaults_row.addWidget(self.defaults_btn)
 
         file_row = QtWidgets.QHBoxLayout()
@@ -88,18 +80,7 @@ class PipelineTab(BaseWidget):
         workdir_row.addWidget(self.workdir_edit)
         workdir_row.addWidget(workdir_btn)
 
-        self.defaults_summary = QtWidgets.QLabel("")
-        self.defaults_summary.setWordWrap(True)
         self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
-        options_box = QtWidgets.QGroupBox("Job options")
-        options_layout = QtWidgets.QVBoxLayout()
-        options_layout.addWidget(self.romaji_check)
-        advanced_notice = QtWidgets.QLabel(
-            "ASR settings come from the Settings tab. Update them there to change defaults."
-        )
-        advanced_notice.setWordWrap(True)
-        options_layout.addWidget(advanced_notice)
-        options_box.setLayout(options_layout)
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -108,9 +89,7 @@ class PipelineTab(BaseWidget):
 
         progress_box = QtWidgets.QVBoxLayout()
         progress_box.addWidget(self.progress_bar)
-        progress_box.addWidget(QtWidgets.QLabel("Current stage"))
         progress_box.addWidget(self.stage_label)
-        progress_box.addWidget(QtWidgets.QLabel("Detail"))
         progress_box.addWidget(self.detail_label)
 
         self.log_view = QtWidgets.QTextEdit()
@@ -123,18 +102,15 @@ class PipelineTab(BaseWidget):
         self.cancel_btn.clicked.connect(self._cancel_job)
 
         main_area.addLayout(defaults_row)
-        main_area.addWidget(self.defaults_summary)
         main_area.addLayout(file_row)
         main_area.addLayout(workdir_row)
-        main_area.addWidget(options_box)
+        main_area.addWidget(self.romaji_check)
         main_area.addLayout(progress_box)
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addWidget(self.run_btn)
         btn_row.addWidget(self.cancel_btn)
         main_area.addLayout(btn_row)
-        main_area.addWidget(QtWidgets.QLabel("Log"))
         main_area.addWidget(self.log_view)
-        main_area.addWidget(QtWidgets.QLabel("Generated files"))
         main_area.addWidget(self.results_list)
         body.addLayout(main_area, 4)
         layout.addLayout(body)
@@ -277,32 +253,6 @@ class PipelineTab(BaseWidget):
     def _sync_from_cfg(self):
         """Mirror saved defaults into the pipeline form."""
         self.cfg = load_app_state()
-        defaults = self.cfg.defaults
-        summary = [
-            f"Model: {defaults.model_size}",
-            f"Beam size: {defaults.beam_size}",
-            f"VAD: {'on' if defaults.vad else 'off'}",
-            f"Mono: {'on' if defaults.mono else 'off'}",
-            f"Subtitle format: {defaults.subtitle_format}",
-        ]
-        advanced = []
-        if defaults.best_of is not None:
-            advanced.append(f"Best of: {defaults.best_of if defaults.best_of > 0 else 'auto'}")
-        if defaults.patience is not None:
-            advanced.append(f"Patience: {defaults.patience}")
-        if defaults.length_penalty is not None:
-            advanced.append(f"Length penalty: {defaults.length_penalty}")
-        advanced.append(f"Word timestamps: {'on' if defaults.word_timestamps else 'off'}")
-        if defaults.threads:
-            advanced.append(f"Threads: {defaults.threads}")
-        if defaults.compute_type:
-            advanced.append(f"Compute: {defaults.compute_type}")
-        if defaults.extra_asr_args:
-            formatted = ", ".join(f"{k}={v}" for k, v in defaults.extra_asr_args.items())
-            advanced.append(f"Extra args: {formatted}")
-
-        summary_text = "Using Settings defaults: " + " • ".join(summary + advanced)
-        self.defaults_summary.setText(summary_text)
         self.romaji_check.setChecked(False)
 
 
@@ -438,11 +388,6 @@ class SettingsTab(BaseWidget):
         form.addRow("VAD", self.vad_check)
         form.addRow("Force mono", self.mono_check)
         form.addRow("Subtitle format", self.subtitle_fmt_combo)
-        translation_notice = QtWidgets.QLabel(
-            "Translation settings were removed. Use an external service like DeepL, ChatGPT, or a local LLM to translate transcripts."
-        )
-        translation_notice.setWordWrap(True)
-        form.addRow("Translation", translation_notice)
         advanced_box = QtWidgets.QGroupBox("Advanced ASR")
         advanced_form = QtWidgets.QFormLayout()
         advanced_form.addRow("Best of (0=auto)", self.best_of_spin)
@@ -454,11 +399,6 @@ class SettingsTab(BaseWidget):
         advanced_form.addRow("Extra ASR args", self.extra_args_edit)
         advanced_box.setLayout(advanced_form)
         form.addRow(advanced_box)
-        defaults_help = QtWidgets.QLabel(
-            "These values set the defaults applied to new pipeline jobs."
-        )
-        defaults_help.setStyleSheet("color: #555;")
-        form.addRow("Defaults", defaults_help)
 
         btn_row = QtWidgets.QHBoxLayout()
         save_btn = QtWidgets.QPushButton("Save")
