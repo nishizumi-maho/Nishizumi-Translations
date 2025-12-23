@@ -24,6 +24,7 @@ class BaseWidget(QtWidgets.QWidget if QtWidgets else object):  # type: ignore[mi
 class PipelineTab(BaseWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.cfg = load_app_state()
         self.job = PipelineJob()
         self.thread_pool = QtCore.QThreadPool.globalInstance() if QtCore else None
         self.pending_jobs: list[PipelineJob] = []
@@ -39,6 +40,19 @@ class PipelineTab(BaseWidget):
         body.addWidget(self.stage_list, 1)
 
         main_area = QtWidgets.QVBoxLayout()
+        defaults_hint = QtWidgets.QLabel(
+            "Job options respect your global defaults from the Settings tab. "
+            "Use the button below to re-apply them at any time."
+        )
+        defaults_hint.setWordWrap(True)
+
+        defaults_row = QtWidgets.QHBoxLayout()
+        defaults_row.addWidget(defaults_hint)
+        self.defaults_btn = QtWidgets.QPushButton("Load defaults from Settings")
+        self.defaults_btn.clicked.connect(self._sync_from_cfg)
+        defaults_row.addStretch(1)
+        defaults_row.addWidget(self.defaults_btn)
+
         file_row = QtWidgets.QHBoxLayout()
         self.source_list = QtWidgets.QListWidget()
         self.source_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
@@ -133,10 +147,11 @@ class PipelineTab(BaseWidget):
         self.results_list = QtWidgets.QListWidget()
         self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.clicked.connect(self._start_job)
-        self.cancel_btn = QtWidgets.QPushButton("Cancel")
+        self.cancel_btn = QtWidgets.QPushButton("Cancel queue")
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_job)
 
+        main_area.addLayout(defaults_row)
         main_area.addLayout(file_row)
         main_area.addLayout(workdir_row)
         main_area.addLayout(form)
@@ -152,6 +167,7 @@ class PipelineTab(BaseWidget):
         main_area.addWidget(self.results_list)
         body.addLayout(main_area, 4)
         layout.addLayout(body)
+        self._sync_from_cfg()
 
     def _choose_workdir(self):  # pragma: no cover - GUI
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Workdir")
@@ -295,6 +311,18 @@ class PipelineTab(BaseWidget):
                 payload[key.strip()] = value.strip()
         return payload or None
 
+    def _sync_from_cfg(self):
+        """Mirror saved defaults into the pipeline form.""
+        self.cfg = load_app_state()
+        defaults = self.cfg.defaults
+        self.model_input.setText(defaults.model_size)
+        self.beam_slider.setValue(defaults.beam_size)
+        self.vad_check.setChecked(defaults.vad)
+        self.mono_check.setChecked(defaults.mono)
+        fmt_idx = self.fmt_combo.findText(defaults.subtitle_format)
+        if fmt_idx >= 0:
+            self.fmt_combo.setCurrentIndex(fmt_idx)
+
 
 class FinalizeTab(BaseWidget):
     def __init__(self, parent=None):
@@ -408,6 +436,11 @@ class SettingsTab(BaseWidget):
         )
         translation_notice.setWordWrap(True)
         form.addRow("Translation", translation_notice)
+        defaults_help = QtWidgets.QLabel(
+            "These values set the defaults applied to new pipeline jobs."
+        )
+        defaults_help.setStyleSheet("color: #555;")
+        form.addRow("Defaults", defaults_help)
 
         btn_row = QtWidgets.QHBoxLayout()
         save_btn = QtWidgets.QPushButton("Save")
