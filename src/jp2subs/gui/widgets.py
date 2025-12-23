@@ -52,10 +52,6 @@ class PipelineTab(BaseWidget):
         body.addWidget(self.stage_list, 1)
 
         main_area = QtWidgets.QVBoxLayout()
-        defaults_row = QtWidgets.QHBoxLayout()
-        self.defaults_btn = QtWidgets.QPushButton("Load defaults")
-        self.defaults_btn.clicked.connect(self._sync_from_cfg)
-        defaults_row.addWidget(self.defaults_btn)
 
         file_row = QtWidgets.QHBoxLayout()
         self.source_list = QtWidgets.QListWidget()
@@ -101,7 +97,6 @@ class PipelineTab(BaseWidget):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_job)
 
-        main_area.addLayout(defaults_row)
         main_area.addLayout(file_row)
         main_area.addLayout(workdir_row)
         main_area.addWidget(self.romaji_check)
