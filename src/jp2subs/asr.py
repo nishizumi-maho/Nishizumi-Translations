@@ -26,7 +26,7 @@ def transcribe_audio(
     word_timestamps: bool = True,
     threads: int | None = None,
     compute_type: str | None = None,
-    extra_args: dict | None = None,
+    extra_args: dict[str, object] | None = None,
     *,
     on_progress: Callable[[ProgressEvent], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
@@ -68,6 +68,12 @@ def transcribe_audio(
         asr_kwargs["length_penalty"] = length_penalty
     if extra_args:
         asr_kwargs.update(extra_args)
+    suppress_tokens = asr_kwargs.get("suppress_tokens")
+    if isinstance(suppress_tokens, int):
+        if suppress_tokens < 0:
+            asr_kwargs.pop("suppress_tokens", None)
+        else:
+            asr_kwargs["suppress_tokens"] = [suppress_tokens]
     segments_iter, info = model.transcribe(
         str(audio_path),
         **asr_kwargs,
@@ -168,4 +174,3 @@ def _probe_duration(audio_path: Path) -> float:
         return float(result.stdout.strip())
     except Exception:  # pragma: no cover - optional dependency/ffprobe absence
         return 0.0
-
