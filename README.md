@@ -53,7 +53,7 @@ This lets you run `jp2subs` from the repo:
 pip install -e .
 ```
 
-### 5) Install optional extras (recommended)
+### 5) Install the extras (must do)
 ```bash
 # ASR (faster-whisper)
 pip install jp2subs[asr]
