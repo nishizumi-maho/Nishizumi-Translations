@@ -35,6 +35,18 @@ class FinalizeJob:
     out_dir: Path | None = None
     codec: str = "libx264"
     crf: int = 18
+    preset: str = "slow"
+    font: str | None = None
+    font_size: int = 36
+    bold: bool = False
+    italic: bool = False
+    outline: int = 2
+    shadow: int = 1
+    margin_v: int = 20
+    alignment: int = 2
+    primary_color: str = "&H00FFFFFF"
+    background_enabled: bool = False
+    background_color: str = "&H80000000"
 
 
 def load_app_state() -> AppConfig:
@@ -43,4 +55,3 @@ def load_app_state() -> AppConfig:
 
 def persist_app_state(cfg: AppConfig) -> None:
     save_config(cfg)
-

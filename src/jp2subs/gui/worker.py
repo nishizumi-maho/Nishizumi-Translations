@@ -89,8 +89,28 @@ class FinalizeWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[mi
             result = video.run_ffmpeg_mux_soft(self.job.video, self.job.subtitle, out, container="mkv")
         else:
             out = video.build_out_path(self.job.video, self.job.subtitle, out_dir, True, None, "mp4", mode="hardcode")
+            styles = {
+                "Fontsize": str(self.job.font_size),
+                "Bold": "1" if self.job.bold else "0",
+                "Italic": "1" if self.job.italic else "0",
+                "Outline": str(self.job.outline),
+                "Shadow": str(self.job.shadow),
+                "MarginV": str(self.job.margin_v),
+                "Alignment": str(self.job.alignment),
+                "PrimaryColour": self.job.primary_color,
+                "BorderStyle": "3" if self.job.background_enabled else "1",
+            }
+            if self.job.background_enabled:
+                styles["BackColour"] = self.job.background_color
             result = video.run_ffmpeg_burn(
-                self.job.video, self.job.subtitle, out, codec=self.job.codec, crf=self.job.crf, preset="slow"
+                self.job.video,
+                self.job.subtitle,
+                out,
+                codec=self.job.codec,
+                crf=self.job.crf,
+                preset=self.job.preset,
+                font=self.job.font,
+                styles=styles,
             )
         self.signals.results.emit([Path(result)])
 
@@ -110,4 +130,3 @@ class WorkerSignals(QtCore.QObject if QtCore else object):  # type: ignore[misc]
         item_done = QtCore.Signal(str, list)
     else:  # pragma: no cover - no Qt
         pass
-

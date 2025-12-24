@@ -297,11 +297,68 @@ class FinalizeTab(BaseWidget):
         self.crf_spin = QtWidgets.QSpinBox()
         self.crf_spin.setRange(10, 40)
         self.crf_spin.setValue(18)
+        self.preset_combo = QtWidgets.QComboBox()
+        self.preset_combo.addItems(
+            [
+                "ultrafast",
+                "superfast",
+                "veryfast",
+                "faster",
+                "fast",
+                "medium",
+                "slow",
+                "slower",
+                "veryslow",
+            ]
+        )
+        self.preset_combo.setCurrentText("slow")
+
+        self.font_edit = QtWidgets.QLineEdit()
+        self.font_size_spin = QtWidgets.QSpinBox()
+        self.font_size_spin.setRange(10, 96)
+        self.font_size_spin.setValue(36)
+        self.bold_check = QtWidgets.QCheckBox()
+        self.italic_check = QtWidgets.QCheckBox()
+        self.outline_spin = QtWidgets.QSpinBox()
+        self.outline_spin.setRange(0, 10)
+        self.outline_spin.setValue(2)
+        self.shadow_spin = QtWidgets.QSpinBox()
+        self.shadow_spin.setRange(0, 10)
+        self.shadow_spin.setValue(1)
+        self.margin_spin = QtWidgets.QSpinBox()
+        self.margin_spin.setRange(0, 200)
+        self.margin_spin.setValue(20)
+        self.alignment_combo = QtWidgets.QComboBox()
+        self.alignment_combo.addItem("Bottom left", 1)
+        self.alignment_combo.addItem("Bottom center", 2)
+        self.alignment_combo.addItem("Bottom right", 3)
+        self.alignment_combo.addItem("Middle left", 4)
+        self.alignment_combo.addItem("Middle center", 5)
+        self.alignment_combo.addItem("Middle right", 6)
+        self.alignment_combo.addItem("Top left", 7)
+        self.alignment_combo.addItem("Top center", 8)
+        self.alignment_combo.addItem("Top right", 9)
+        self.alignment_combo.setCurrentIndex(1)
+        self.primary_color_edit = QtWidgets.QLineEdit("&H00FFFFFF")
+        self.background_check = QtWidgets.QCheckBox()
+        self.background_color_edit = QtWidgets.QLineEdit("&H80000000")
 
         form = QtWidgets.QFormLayout()
         form.addRow("Mode", self.mode_combo)
         form.addRow("Codec", self.codec_edit)
-        form.addRow("CRF", self.crf_spin)
+        form.addRow("Quality (CRF)", self.crf_spin)
+        form.addRow("Preset", self.preset_combo)
+        form.addRow("Subtitle font", self.font_edit)
+        form.addRow("Subtitle size", self.font_size_spin)
+        form.addRow("Bold subtitles", self.bold_check)
+        form.addRow("Italic subtitles", self.italic_check)
+        form.addRow("Outline size", self.outline_spin)
+        form.addRow("Shadow size", self.shadow_spin)
+        form.addRow("Bottom margin", self.margin_spin)
+        form.addRow("Alignment", self.alignment_combo)
+        form.addRow("Subtitle color", self.primary_color_edit)
+        form.addRow("Subtitle background", self.background_check)
+        form.addRow("Background color", self.background_color_edit)
 
         self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.clicked.connect(self._start_job)
@@ -333,6 +390,21 @@ class FinalizeTab(BaseWidget):
         job.mode = self.mode_combo.currentText()
         job.codec = self.codec_edit.text() or "libx264"
         job.crf = self.crf_spin.value()
+        job.preset = self.preset_combo.currentText()
+        font_text = self.font_edit.text().strip()
+        job.font = font_text or None
+        job.font_size = self.font_size_spin.value()
+        job.bold = self.bold_check.isChecked()
+        job.italic = self.italic_check.isChecked()
+        job.outline = self.outline_spin.value()
+        job.shadow = self.shadow_spin.value()
+        job.margin_v = self.margin_spin.value()
+        job.alignment = int(self.alignment_combo.currentData())
+        primary_color = self.primary_color_edit.text().strip()
+        job.primary_color = primary_color or job.primary_color
+        job.background_enabled = self.background_check.isChecked()
+        background_color = self.background_color_edit.text().strip()
+        job.background_color = background_color or job.background_color
 
         if not job.video or not job.video.exists():
             self.log_view.append("Error: video file not found.")
