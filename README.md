@@ -27,7 +27,7 @@ cd jp2subs-workspace
 
 ### 2) Clone the repository
 ```bash
-git clone https://github.com/<your-org-or-user>/Nishizumi-Translations.git
+git clone https://github.com/nishizumi-maho/Nishizumi-Translations.git
 cd Nishizumi-Translations
 ```
 
