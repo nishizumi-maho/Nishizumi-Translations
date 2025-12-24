@@ -47,6 +47,13 @@ def test_run_ffmpeg_mux_soft_builds_command(monkeypatch):
     assert "language=en" in captured["cmd"]
 
 
+def test_run_ffmpeg_mux_soft_rejects_in_place_output():
+    with pytest.raises(ValueError, match="Output path matches input video"):
+        video.run_ffmpeg_mux_soft(
+            "input.mkv", "captions.srt", "input.mkv", container="mkv", lang="en"
+        )
+
+
 def test_run_ffmpeg_burn_uses_ass_filter(monkeypatch):
     captured = _capture_run(monkeypatch)
     subs_path = Path("C:/Video Files/Subs:Archive/movie subs.ass")
@@ -64,7 +71,7 @@ def test_run_ffmpeg_burn_uses_ass_filter(monkeypatch):
 
     vf_index = captured["cmd"].index("-vf")
     filter_arg = captured["cmd"][vf_index + 1]
-    assert r"ass=C\:/Video\ Files/Subs\:Archive/movie\ subs.ass" in filter_arg
+    assert r"ass='C\:/Video\ Files/Subs\:Archive/movie\ subs.ass'" in filter_arg
     assert "force_style='Fontname=My Font,Outline=2'" in filter_arg
 
 
@@ -83,7 +90,7 @@ def test_run_ffmpeg_burn_uses_subtitles_filter(monkeypatch):
 
     vf_index = captured["cmd"].index("-vf")
     filter_arg = captured["cmd"][vf_index + 1]
-    assert filter_arg.startswith("subtitles=")
+    assert filter_arg.startswith("subtitles='")
     assert "ass=" not in filter_arg
     assert "-crf" in captured["cmd"]
     assert captured["cmd"][captured["cmd"].index("-crf") + 1] == "20"

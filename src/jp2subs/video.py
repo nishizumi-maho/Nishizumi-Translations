@@ -31,14 +31,21 @@ def _escape_filter_path(path: Path) -> str:
     )
 
 
+def _quote_filter_value(value: str) -> str:
+    """Wrap a filter argument in single quotes with escaping."""
+
+    escaped = value.replace("'", r"\'")
+    return f"'{escaped}'"
+
+
 def _build_subtitles_filter(
     subs: Path, font: Optional[str], styles: Optional[Dict[str, str]], fonts_dir: Optional[Path]
 ) -> str:
     ext = subs.suffix.lower().lstrip(".")
     filter_name = "ass" if ext == "ass" else "subtitles"
-    base = f"{filter_name}={_escape_filter_path(subs)}"
+    base = f"{filter_name}={_quote_filter_value(_escape_filter_path(subs))}"
     if fonts_dir:
-        base += f":fontsdir={_escape_filter_path(fonts_dir)}"
+        base += f":fontsdir={_quote_filter_value(_escape_filter_path(fonts_dir))}"
 
     style_entries: list[str] = []
     if font:
@@ -112,6 +119,8 @@ def run_ffmpeg_mux_soft(
     lang: str | None = None,
     verbose: bool = False,
 ) -> Path:
+    if Path(out_path).resolve() == Path(video).resolve():
+        raise ValueError("Output path matches input video; choose a different output file.")
     subtitle_codec = validate_subtitle_format(container, subtitle)
     cmd = [
         "ffmpeg",
