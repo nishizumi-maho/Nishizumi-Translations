@@ -221,15 +221,13 @@ jp2subs finalize
 ```
 You’ll be prompted to select a video, subtitle file, and output mode (sidecar/softcode/hardcode).
 
+
+If you want to use another model, you only need to paste the model location, so instead of ''large-v3" paste "C:\model\whisper-jp-ct2" for example.
+
 ### Configure inside the app
 - Open the **Settings** tab in the GUI to edit `ffmpeg_path`, default ASR model/beam/vad/mono, and subtitle format.
 - Use **Save** to write changes immediately to `%APPDATA%/jp2subs/config.toml` (or `~/.config/jp2subs` on non-Windows). **Load** refreshes from disk and **Reset** restores built-in defaults.
 - The **Pipeline** tab exposes advanced ASR overrides (threads, patience, length penalty, compute type, raw extra args) and highlights each stage as it runs.
-
-## Translation
-Translation is no longer built into jp2subs. Use an external option such as DeepL, ChatGPT, or a local LLM runner to translate the generated Japanese transcripts before muxing them back with the hardcode/softcode/sidecar commands.
-
-## Screenshots
 
 ## Master JSON format
 See [`examples/master.sample.json`](examples/master.sample.json) for the full contract:
