@@ -13,34 +13,90 @@ Windows-friendly CLI/GUI tool that turns Japanese audio/video into high-fidelity
 - Soft-mux to MKV and hard-burn via ffmpeg + libass.
 - Workdir caching; pipeline skips stages when `master.json` already exists.
 
-## Installation
-Requirements: Python 3.11+, ffmpeg on PATH (Windows). Optional: `faster-whisper` for ASR, `requests` for generic API providers.
+## Installation (step-by-step for first-time users)
+Requirements: Python 3.11+, ffmpeg on PATH. Optional: `faster-whisper` for ASR, `requests` for generic API providers, `PySide6` for GUI.
 
+> **Tip:** The CLI works on macOS/Linux/Windows. The GUI requires `jp2subs[gui]`.
+
+### 1) Create a workspace folder
+Pick a place where you want the app to live. Example:
 ```bash
-python -m venv .venv
-.venv\\Scripts\\activate  # PowerShell
-pip install -e .
-# Extras
-pip install jp2subs[asr]     # faster-whisper
-pip install jp2subs[llm]     # requests for generic API
-pip install jp2subs[gui]     # PySide6 for the desktop interface
+mkdir jp2subs-workspace
+cd jp2subs-workspace
 ```
 
-Models:
-- **faster-whisper**: download a model (e.g., `large-v3`) and keep it in the default cache (~AppData/Local/whisper).
+### 2) Clone the repository
+```bash
+git clone https://github.com/<your-org-or-user>/Nishizumi-Translations.git
+cd Nishizumi-Translations
+```
 
-## Quickstart
+### 3) Create and activate a virtual environment
+**Windows (PowerShell):**
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+**macOS/Linux (bash/zsh):**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 4) Install the package (editable install)
+This lets you run `jp2subs` from the repo:
+```bash
+pip install -e .
+```
+
+### 5) Install optional extras (recommended)
+```bash
+# ASR (faster-whisper)
+pip install jp2subs[asr]
+
+# GUI (desktop app)
+pip install jp2subs[gui]
+
+# Generic API helper (requests)
+pip install jp2subs[llm]
+```
+
+### 6) Install ffmpeg (required for ingest/mux/burn)
+Make sure `ffmpeg` is available on your PATH:
+```bash
+ffmpeg -version
+```
+If the command is not found, install ffmpeg:
+- Windows: download from https://ffmpeg.org/ and add the `bin` folder to PATH.
+- macOS: `brew install ffmpeg`
+- Linux: use your distro package manager (e.g., `sudo apt install ffmpeg`).
+
+### 7) Download a whisper model (for transcription)
+`faster-whisper` uses cached models. The default cache is in `~/.cache/whisper` (Linux/macOS) or `~AppData/Local/whisper` (Windows).
+Common choices:
+- `small` (fast, lower quality)
+- `medium` (balanced)
+- `large-v3` (best quality, slower)
+
+### 8) Launch the app
 ```bash
 # GUI
 jp2subs ui
 
+# Or just run the CLI wizard
+jp2subs wizard
+```
+
+## Quickstart (CLI)
+```bash
 # 1) Ingest (extract audio to workdir)
 jp2subs ingest input.mkv --workdir workdir
 
-# 2) Transcribe
+# 2) Transcribe (generates master.json + transcript_ja.txt + transcript_ja.srt)
 jp2subs transcribe workdir/audio.flac --workdir workdir --model-size large-v3
 
-# 3) Romanize (optional)
+# 3) Romanize (optional, adds romaji fields and outputs transcript_romaji.*)
 jp2subs romanize workdir/master.json --workdir workdir
 
 # 4) Export Japanese subtitles
@@ -50,11 +106,117 @@ jp2subs export workdir/master.json --format ass --lang ja --out workdir/subs_ja.
 jp2subs softcode input.mkv workdir/subs_ja.ass --same-name --container mkv
 jp2subs hardcode input.mkv workdir/subs_ja.ass --same-name --suffix .hard --crf 18
 jp2subs sidecar input.mkv workdir/subs_ja.ass --out-dir releases
-
-# Need another language? Translate the generated transcript with a local LLM, DeepL, or ChatGPT, then remux using hardcode/softcode/sidecar.
 ```
 
-Tip: jp2subs now always outputs Japanese transcripts/subtitles; use those files with an external translator if you need another language.
+Tip: jp2subs now always outputs Japanese transcripts/subtitles. Use those files with an external translator if you need another language.
+
+## Detailed usage guide
+### Option 1: GUI workflow (beginner-friendly)
+1. Run `jp2subs ui`.
+2. Open the **Pipeline** tab.
+3. **Input**: choose your video/audio file.
+4. **Workdir**: pick or create a folder where outputs will be saved.
+5. Choose **Model size**, **VAD**, **Beam size**, **Device**.
+6. Click **Run**. The pipeline shows progress for ingest → transcribe → romanize → export.
+7. Use the **Finalize** tab to soft-mux, hard-burn, or create a sidecar subtitle file.
+
+### Option 2: Interactive wizard (CLI)
+Run:
+```bash
+jp2subs wizard
+```
+The wizard will ask you:
+- Input media file
+- Workdir
+- Mono vs stereo
+- Model size (e.g., `small`, `medium`, `large-v3`)
+- Beam size (higher = higher quality, slower)
+- VAD on/off (on removes silence, off keeps raw timing)
+- Device (`auto`, `cuda`, `cpu`)
+- Optional romaji
+- Subtitle format (`srt`, `vtt`, `ass`)
+- Output type (subtitles, mux-soft, burn)
+
+### Option 3: Manual CLI pipeline (advanced)
+Use this when you want full control over every step.
+
+#### 1) Ingest
+Extracts audio to `<workdir>/audio.flac` (48kHz). If input is already audio, it is copied.
+```bash
+jp2subs ingest <input> --workdir <folder> [--mono]
+```
+Options:
+- `--workdir`: output folder (default: `workdir`)
+- `--mono`: downmix to mono for ASR speed (default: stereo)
+
+#### 2) Transcribe
+Creates `<workdir>/master.json`, `<workdir>/transcript_ja.txt`, `<workdir>/transcript_ja.srt`.
+```bash
+jp2subs transcribe <input> --workdir <folder> --model-size large-v3 --device auto --vad --temperature 0 --beam-size 5
+```
+Options:
+- `--model-size`: whisper model (`tiny`/`small`/`medium`/`large-v3`)
+- `--device`: `auto`, `cuda`, or `cpu`
+- `--vad / --no-vad`: toggle VAD silence trimming
+- `--temperature`: decoding randomness (0 = deterministic)
+- `--beam-size`: higher values increase quality/latency
+
+#### 3) Romanize (optional)
+Adds `romaji` to `master.json` and writes `transcript_romaji.txt/srt`.
+```bash
+jp2subs romanize <workdir>/master.json --workdir <folder>
+```
+
+#### 4) Export subtitles
+```bash
+jp2subs export <workdir>/master.json --format ass --lang ja --out <path> --workdir <folder>
+```
+Options:
+- `--format`: `srt`, `vtt`, or `ass`
+- `--lang`: language code (default `ja`)
+- `--out`: output path (defaults to `<workdir>/subs_<lang>.<format>`)
+
+#### 5) Apply subtitles to a video
+**Soft-mux (no re-encode, fastest):**
+```bash
+jp2subs softcode <video> <subs> --container mkv --same-name --lang ja
+```
+Options:
+- `--container`: `mkv` or `mp4`
+- `--same-name`: use video name for output
+- `--suffix`: optional suffix for output filename
+- `--lang`: subtitle language code tag
+
+**Hard-burn (re-encode, permanent subtitles):**
+```bash
+jp2subs hardcode <video> <subs> --same-name --suffix .hard --crf 18 --codec libx264 --preset slow
+```
+Options:
+- `--crf`: quality (lower = better, larger file)
+- `--codec`: `libx264` or other FFmpeg codec
+- `--preset`: encoding speed/quality balance
+
+**Sidecar (external subtitle file):**
+```bash
+jp2subs sidecar <video> <subs> --out-dir <folder> --same-name
+```
+
+### Batch processing
+Process many files in a folder:
+```bash
+jp2subs batch <input_dir> --ext "mp4,mkv,flac" --workdir workdir --model-size large-v3 --format srt
+```
+Useful flags:
+- `--ext`: comma-separated extensions
+- `--force`: re-run stages even if cached
+- `--mono`: downmix during ingest
+
+### Finalize existing subtitles
+If you already have SRT/VTT/ASS files:
+```bash
+jp2subs finalize
+```
+You’ll be prompted to select a video, subtitle file, and output mode (sidecar/softcode/hardcode).
 
 ### Configure inside the app
 - Open the **Settings** tab in the GUI to edit `ffmpeg_path`, default ASR model/beam/vad/mono, and subtitle format.
