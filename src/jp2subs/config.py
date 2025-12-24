@@ -56,6 +56,8 @@ class DefaultsConfig:
     word_timestamps: bool = True
     threads: int | None = None
     compute_type: str | None = None
+    suppress_blank: bool = False
+    suppress_tokens: int = -1
     extra_asr_args: dict[str, str] | None = None
 
 
@@ -178,4 +180,3 @@ def _escape_basic_string(value: str) -> str:
     """Escape backslashes and quotes for TOML basic strings."""
 
     return value.replace("\\", "\\\\").replace("\"", "\\\"")
-

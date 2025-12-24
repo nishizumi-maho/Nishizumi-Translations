@@ -238,7 +238,10 @@ class PipelineTab(BaseWidget):
         job.word_timestamps = defaults.word_timestamps
         job.threads = defaults.threads
         job.compute_type = defaults.compute_type
-        job.extra_asr_args = defaults.extra_asr_args
+        extra_args = dict(defaults.extra_asr_args or {})
+        extra_args["suppress_blank"] = defaults.suppress_blank
+        extra_args["suppress_tokens"] = defaults.suppress_tokens
+        job.extra_asr_args = extra_args
         return job
 
     def _reset_stage_list(self):  # pragma: no cover - GUI
@@ -410,6 +413,11 @@ class SettingsTab(BaseWidget):
         compute_idx = self.compute_combo.findText(self.cfg.defaults.compute_type or "default")
         if compute_idx >= 0:
             self.compute_combo.setCurrentIndex(compute_idx)
+        self.suppress_blank_check = QtWidgets.QCheckBox()
+        self.suppress_blank_check.setChecked(self.cfg.defaults.suppress_blank)
+        self.suppress_tokens_spin = QtWidgets.QSpinBox()
+        self.suppress_tokens_spin.setRange(-1, 100000)
+        self.suppress_tokens_spin.setValue(self.cfg.defaults.suppress_tokens)
         self.extra_args_edit = QtWidgets.QPlainTextEdit()
         self.extra_args_edit.setPlaceholderText("key=value pairs, one line or space separated")
         self.extra_args_edit.setPlainText(self._format_extra_args(self.cfg.defaults.extra_asr_args))
@@ -427,6 +435,8 @@ class SettingsTab(BaseWidget):
         advanced_form.addRow("Word timestamps", self.word_ts_check)
         advanced_form.addRow("Threads (0=auto)", self.thread_spin)
         advanced_form.addRow("Compute type", self.compute_combo)
+        advanced_form.addRow("Suppress blank", self.suppress_blank_check)
+        advanced_form.addRow("Suppress tokens (-1=auto)", self.suppress_tokens_spin)
         advanced_form.addRow("Extra ASR args", self.extra_args_edit)
         advanced_box.setLayout(advanced_form)
         form.addRow(advanced_box)
@@ -468,6 +478,8 @@ class SettingsTab(BaseWidget):
         self.cfg.defaults.threads = self.thread_spin.value() or None
         compute_type = self.compute_combo.currentText()
         self.cfg.defaults.compute_type = None if compute_type == "default" else compute_type
+        self.cfg.defaults.suppress_blank = self.suppress_blank_check.isChecked()
+        self.cfg.defaults.suppress_tokens = self.suppress_tokens_spin.value()
         self.cfg.defaults.extra_asr_args = parse_extra_args(self.extra_args_edit.toPlainText())
         persist_app_state(self.cfg)
 
@@ -503,6 +515,8 @@ class SettingsTab(BaseWidget):
         compute_idx = self.compute_combo.findText(self.cfg.defaults.compute_type or "default")
         if compute_idx >= 0:
             self.compute_combo.setCurrentIndex(compute_idx)
+        self.suppress_blank_check.setChecked(self.cfg.defaults.suppress_blank)
+        self.suppress_tokens_spin.setValue(self.cfg.defaults.suppress_tokens)
         self.extra_args_edit.setPlainText(self._format_extra_args(self.cfg.defaults.extra_asr_args))
 
     def _format_extra_args(self, extra_args: dict[str, str] | None) -> str:
