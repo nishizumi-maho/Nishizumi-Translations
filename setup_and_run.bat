@@ -38,7 +38,7 @@ if errorlevel 1 (
 )
 
 REM ---- 2) Check Python version (needs 3.11+)
-py -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+py -c "import sys; raise SystemExit^(0 if sys.version_info[:2] >= ^(3,11^) else 1^)" >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Python version is below 3.11. >> "%LOG%"
   echo.
