@@ -267,6 +267,7 @@ class FinalizeTab(BaseWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.thread_pool = QtCore.QThreadPool.globalInstance() if QtCore else None
+        self._worker = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -322,18 +323,41 @@ class FinalizeTab(BaseWidget):
 
     def _start_job(self):  # pragma: no cover - GUI
         job = FinalizeJob()
-        job.video = Path(self.video_edit.text()) if self.video_edit.text() else None
-        job.subtitle = Path(self.subs_edit.text()) if self.subs_edit.text() else None
+        video_text = self.video_edit.text().strip()
+        subtitle_text = self.subs_edit.text().strip()
+        job.video = Path(video_text) if video_text else None
+        job.subtitle = Path(subtitle_text) if subtitle_text else None
         job.mode = self.mode_combo.currentText()
         job.codec = self.codec_edit.text() or "libx264"
         job.crf = self.crf_spin.value()
 
+        if not job.video or not job.video.exists():
+            self.log_view.append("Error: video file not found.")
+            return
+        if not job.subtitle or not job.subtitle.exists():
+            self.log_view.append("Error: subtitle file not found.")
+            return
+
         worker = FinalizeWorker(job)
         worker.signals.log.connect(self.log_view.append)
-        worker.signals.failed.connect(lambda msg: self.log_view.append(f"Error: {msg}"))
-        worker.signals.results.connect(lambda items: self.log_view.append(f"Output: {items[0]}"))
+        worker.signals.failed.connect(self._on_failed)
+        worker.signals.results.connect(self._on_results)
+        worker.signals.finished.connect(self._finalize_controls)
+        self.run_btn.setEnabled(False)
+        self._worker = worker
         if self.thread_pool:
             self.thread_pool.start(worker)
+
+    def _on_failed(self, msg: str) -> None:  # pragma: no cover - GUI
+        self.log_view.append(f"Error: {msg}")
+        self._finalize_controls()
+
+    def _on_results(self, items: list[Path]) -> None:  # pragma: no cover - GUI
+        if items:
+            self.log_view.append(f"Output: {items[0]}")
+
+    def _finalize_controls(self) -> None:  # pragma: no cover - GUI
+        self.run_btn.setEnabled(True)
 
 
 class SettingsTab(BaseWidget):
