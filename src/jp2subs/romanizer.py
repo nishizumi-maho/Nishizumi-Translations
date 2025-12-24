@@ -18,6 +18,7 @@ def romanize_segments(
     converter.setMode("H", "a")
     converter.setMode("K", "a")
     converter.setMode("J", "a")
+    converter.setMode("s", True)
     conv = converter.getConverter()
 
     romaji_list: List[str] = []
@@ -28,4 +29,3 @@ def romanize_segments(
     if on_progress:
         on_progress(ProgressEvent(stage="Romanize", percent=stage_percent("Romanize", 1), message="Romanization complete"))
     return doc
-
