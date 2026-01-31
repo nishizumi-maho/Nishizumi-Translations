@@ -1,4 +1,4 @@
-"""Qt widgets for jp2subs GUI."""
+"""Qt widgets for jp2subs GUI (modern shell)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,6 +56,7 @@ class PipelineTab(BaseWidget):
 
         file_row = QtWidgets.QHBoxLayout()
         self.source_list = QtWidgets.QListWidget()
+        self.source_list.setObjectName("SourceList")
         self.source_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         pick_btn = QtWidgets.QPushButton("Choose files")
         pick_btn.clicked.connect(self._choose_source)
@@ -80,6 +81,7 @@ class PipelineTab(BaseWidget):
         self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
 
         self.progress_bar = QtWidgets.QProgressBar()
+        self.progress_bar.setObjectName("MainProgressBar")
         self.progress_bar.setRange(0, 100)
         self.stage_label = QtWidgets.QLabel("Idle")
         self.detail_label = QtWidgets.QLabel("")
@@ -93,8 +95,10 @@ class PipelineTab(BaseWidget):
         self.detail_label.setVisible(False)
 
         self.log_view = QtWidgets.QTextEdit()
+        self.log_view.setObjectName("LogView")
         self.log_view.setReadOnly(True)
         self.results_list = QtWidgets.QListWidget()
+        self.results_list.setObjectName("ResultsList")
         self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.clicked.connect(self._start_job)
         self.cancel_btn = QtWidgets.QPushButton("Cancel queue")
@@ -135,7 +139,7 @@ class PipelineTab(BaseWidget):
         workdir_text = self.workdir_edit.text()
         workdir = Path(workdir_text) if workdir_text else None
 
-        self.pending_jobs: list[PipelineJob] = [self._build_job(source, workdir) for source in sources]
+        self.pending_jobs = [self._build_job(source, workdir) for source in sources]
         self.completed_jobs = 0
         self.total_jobs = len(self.pending_jobs)
 
@@ -597,19 +601,6 @@ class SettingsTab(BaseWidget):
         return "\n".join(f"{key}={value}" for key, value in extra_args.items())
 
 
-class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignore[misc]
-    def __init__(self):
-        if not QtWidgets:
-            raise RuntimeError("PySide6 is required for the GUI")
-        super().__init__()
-        self.setWindowTitle("jp2subs")
-        tabs = QtWidgets.QTabWidget()
-        tabs.addTab(PipelineTab(), "Pipeline")
-        tabs.addTab(FinalizeTab(), "Finalize")
-        tabs.addTab(SettingsTab(), "Settings")
-        self.setCentralWidget(tabs)
-
-
 STAGES = [
     "Ingest",
     "Transcribe",
@@ -651,3 +642,141 @@ class StageListWidget(QtWidgets.QListWidget if QtWidgets else object):  # type: 
             item = matches[0]
             base = item.text().replace("✓ ", "")
             item.setText(f"✓ {base}")
+
+
+class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignore[misc]
+    def __init__(self):
+        if not QtWidgets:
+            raise RuntimeError("PySide6 is required for the GUI")
+        super().__init__()
+
+        self.setWindowTitle("jp2subs — Japanese → Subtitles")
+        self.resize(1180, 760)
+        self._init_ui()
+        self._init_status_bar()
+
+    def _init_ui(self) -> None:
+        # Root shell widget so we can style via objectName
+        shell = QtWidgets.QWidget()
+        shell.setObjectName("AppShell")
+
+        root = QtWidgets.QVBoxLayout(shell)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
+
+        header = self._build_header()
+        root.addWidget(header)
+
+        # Card that holds the tab widget
+        card = QtWidgets.QFrame()
+        card.setObjectName("Card")
+        card_layout = QtWidgets.QVBoxLayout(card)
+        card_layout.setContentsMargins(16, 16, 16, 16)
+        card_layout.setSpacing(10)
+
+        tabs = QtWidgets.QTabWidget()
+        tabs.setObjectName("mainTabs")
+        tabs.setTabPosition(QtWidgets.QTabWidget.North)
+        tabs.setDocumentMode(True)
+        tabs.setMovable(False)
+        tabs.setElideMode(QtCore.Qt.ElideRight)
+
+        style = self.style()
+        tabs.addTab(
+            PipelineTab(),
+            style.standardIcon(QtWidgets.QStyle.SP_ArrowRight),
+            "Pipeline",
+        )
+        tabs.addTab(
+            FinalizeTab(),
+            style.standardIcon(QtWidgets.QStyle.SP_DialogSaveButton),
+            "Finalize",
+        )
+        tabs.addTab(
+            SettingsTab(),
+            style.standardIcon(QtWidgets.QStyle.SP_FileDialogDetailedView),
+            "Settings",
+        )
+
+        card_layout.addWidget(tabs)
+        root.addWidget(card, 1)
+
+        self._tabs = tabs  # type: ignore[attr-defined]
+        self.setCentralWidget(shell)
+
+    def _build_header(self) -> QtWidgets.QWidget:
+        header = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        icon_label = QtWidgets.QLabel()
+        icon_size = 32
+        pix = QtGui.QPixmap(icon_size, icon_size)
+        pix.fill(QtCore.Qt.transparent)
+
+        # Simple circular accent logo
+        painter = QtGui.QPainter(pix)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setBrush(QtGui.QColor("#4f46e5"))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawEllipse(0, 0, icon_size, icon_size)
+        painter.end()
+        icon_label.setPixmap(pix)
+
+        title_box = QtWidgets.QVBoxLayout()
+        title_label = QtWidgets.QLabel("jp2subs")
+        title_label.setObjectName("TitleLabel")
+        subtitle_label = QtWidgets.QLabel(
+            "Transcribe, romanize, translate, and subtitle Japanese audio/video."
+        )
+        subtitle_label.setObjectName("SubtitleLabel")
+        subtitle_label.setWordWrap(True)
+        title_box.addWidget(title_label)
+        title_box.addWidget(subtitle_label)
+
+        layout.addWidget(icon_label, 0, QtCore.Qt.AlignTop)
+        layout.addLayout(title_box, 1)
+
+        # Right side: quick actions
+        actions_box = QtWidgets.QHBoxLayout()
+        actions_box.setSpacing(8)
+
+        docs_btn = QtWidgets.QPushButton("Docs")
+        docs_btn.clicked.connect(self._open_docs)
+
+        about_btn = QtWidgets.QPushButton("About")
+        about_btn.clicked.connect(self._show_about)
+
+        actions_box.addWidget(docs_btn)
+        actions_box.addWidget(about_btn)
+        actions_box.addStretch(1)
+
+        layout.addLayout(actions_box, 0)
+        return header
+
+    def _init_status_bar(self) -> None:
+        sb = QtWidgets.QStatusBar(self)
+        sb.setSizeGripEnabled(True)
+        self.setStatusBar(sb)
+
+    # --- convenience slots -------------------------------------------------
+
+    @QtCore.Slot()
+    def _open_docs(self) -> None:
+        """Open project README on GitHub in the default browser."""
+        url = QtCore.QUrl("https://github.com/nishizumi-maho/Nishizumi-Translations")
+        QtGui.QDesktopServices.openUrl(url)
+
+    @QtCore.Slot()
+    def _show_about(self) -> None:
+        QtWidgets.QMessageBox.information(
+            self,
+            "About jp2subs",
+            (
+                "jp2subs GUI\n\n"
+                "CLI and GUI pipeline for Japanese transcription, romanization, "
+                "translation, and subtitle generation.\n\n"
+                "Powered by PySide6 and open-source components."
+            ),
+        )
