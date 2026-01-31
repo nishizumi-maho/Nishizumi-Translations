@@ -94,7 +94,7 @@ QLabel#SubtitleLabel {{
 }}
 
 QTabWidget::pane {{
-    border: 1px solid {BORDER_COLOR};
+    border: none;
     border-radius: 12px;
     background-color: {SURFACE_MEDIUM};
     margin-top: 4px;
