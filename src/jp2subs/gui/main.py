@@ -1,23 +1,24 @@
-"""Entry point for jp2subs GUI."""
+"""GUI launcher for jp2subs."""
 from __future__ import annotations
 
 import sys
 
+from PySide6 import QtWidgets
 
-def launch():  # pragma: no cover - UI bootstrap
-    try:
-        from PySide6 import QtWidgets
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("PySide6 is not installed. Install jp2subs[gui].") from exc
+from .theme import apply_app_theme
+from .widgets import MainWindow
 
-    from .widgets import MainWindow
 
+def launch() -> None:
+    """Entry point for `jp2subs-gui`."""
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    app.exec()
+    apply_app_theme(app)
 
+    win = MainWindow()
+    win.show()
 
-if __name__ == "__main__":  # pragma: no cover
-    launch()
+    # Optional: initial status message
+    if win.statusBar():
+        win.statusBar().showMessage("Ready • Drag audio/video files into the Pipeline tab")
 
+    sys.exit(app.exec())
