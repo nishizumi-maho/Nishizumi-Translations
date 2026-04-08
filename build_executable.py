@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import platform
 import shutil
 import subprocess
@@ -78,16 +79,22 @@ def main() -> int:
             cmd.append(f"--icon={icon_path_mac}")
 
     # Add data files and hidden imports
+    data_sep = ";" if platform.system() == "Windows" else ":"
     cmd.extend(
         [
-            f"--add-data={src_dir / 'jp2subs'}:jp2subs",
+            f"--add-data={src_dir / 'jp2subs'}{data_sep}jp2subs",
             "--hidden-import=PySide6",
             "--hidden-import=PySide6.QtCore",
             "--hidden-import=PySide6.QtGui",
             "--hidden-import=PySide6.QtWidgets",
-            "--collect-all=PySide6",
+            "--hidden-import=jp2subs.gui.main",
+            "--hidden-import=pykakasi",
+            "--hidden-import=rich",
+            "--hidden-import=tqdm",
+            "--hidden-import=typer",
         ]
     )
+    _append_optional_collects(cmd)
 
     # Optimize
     cmd.extend(
@@ -102,8 +109,8 @@ def main() -> int:
     # Entry point script
     entry_script = src_dir / "jp2subs" / "gui" / "__main__.py"
 
-    # If __main__.py doesn't exist or is minimal, create a proper entry script
-    if not entry_script.exists() or entry_script.stat().st_size < 200:
+    # If __main__.py doesn't exist, create a proper entry script.
+    if not entry_script.exists():
         entry_script = project_root / "build_entry.py"
         entry_script.write_text(
             '''#!/usr/bin/env python3
@@ -145,6 +152,18 @@ if __name__ == "__main__":
     print("=" * 60)
 
     return 0
+
+
+def _append_optional_collects(cmd: list[str]) -> None:
+    optional_packages = [
+        ("faster_whisper", ["--collect-submodules=faster_whisper", "--collect-data=faster_whisper"]),
+        ("ctranslate2", ["--collect-binaries=ctranslate2"]),
+        ("tokenizers", ["--collect-binaries=tokenizers"]),
+        ("onnxruntime", ["--collect-binaries=onnxruntime"]),
+    ]
+    for package_name, options in optional_packages:
+        if importlib.util.find_spec(package_name):
+            cmd.extend(options)
 
 
 if __name__ == "__main__":

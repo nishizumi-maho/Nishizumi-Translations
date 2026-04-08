@@ -38,7 +38,14 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
         doc.add_romaji(["konnichiwa"])
         return doc
 
-    def fake_write_subtitles(doc: MasterDocument, path: Path, fmt: str, lang: str, secondary: str | None = None):
+    def fake_write_subtitles(
+        doc: MasterDocument,
+        path: Path,
+        fmt: str,
+        lang: str,
+        secondary: str | None = None,
+        **_: object,
+    ):
         calls["export"] += 1
         path.write_text(f"{fmt}-{lang}-{secondary or ''}", encoding="utf-8")
         return path
@@ -67,7 +74,7 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
         assert (workdir_path / f".{stage}.done").exists()
     master_doc = io.load_master(io.master_path_from_workdir(workdir_path))
     assert master_doc.segments[0].ja_raw == "こんにちは"
-    assert all(count == 1 for count in calls.values())
+    assert calls == {"ingest": 1, "transcribe": 1, "romanize": 1, "export": 2}
 
     second = runner.invoke(
         cli.app,
@@ -82,4 +89,4 @@ def test_batch_creates_cached_workdirs(tmp_path, monkeypatch):
     )
 
     assert second.exit_code == 0, second.output
-    assert all(count == 1 for count in calls.values())
+    assert calls == {"ingest": 1, "transcribe": 1, "romanize": 1, "export": 2}

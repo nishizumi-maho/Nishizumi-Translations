@@ -14,16 +14,37 @@ except Exception:  # pragma: no cover - allow import without Qt
     QtCore = QtGui = QtWidgets = None  # type: ignore
 
 
-def parse_extra_args(raw: str) -> dict[str, str] | None:
+def parse_extra_args(raw: str) -> dict[str, object] | None:
     """Parse key=value pairs into a mapping."""
 
     parts = [token.strip() for token in raw.replace("\n", " ").split(" ") if token.strip()]
-    payload: dict[str, str] = {}
+    payload: dict[str, object] = {}
     for token in parts:
         if "=" in token:
             key, value = token.split("=", 1)
-            payload[key.strip()] = value.strip()
+            payload[key.strip()] = _parse_extra_value(value.strip())
     return payload or None
+
+
+def _parse_extra_value(value: str) -> object:
+    lowered = value.lower()
+    if lowered in {"true", "yes", "on"}:
+        return True
+    if lowered in {"false", "no", "off"}:
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _safe_path_component(value: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in value).strip("._")
+    return cleaned or "job"
 
 
 class BaseWidget(QtWidgets.QWidget if QtWidgets else object):  # type: ignore[misc]
@@ -31,6 +52,38 @@ class BaseWidget(QtWidgets.QWidget if QtWidgets else object):  # type: ignore[mi
         if not QtWidgets:
             raise RuntimeError("PySide6 is required for the GUI")
         super().__init__(*args, **kwargs)
+
+
+class FileDropListWidget(QtWidgets.QListWidget if QtWidgets else object):  # type: ignore[misc]
+    if QtCore:  # pragma: no cover - type guarded
+        files_dropped = QtCore.Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        if not QtWidgets:
+            return
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DropOnly)
+
+    def dragEnterEvent(self, event):  # pragma: no cover - GUI
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # pragma: no cover - GUI
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):  # pragma: no cover - GUI
+        paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self.files_dropped.emit(paths)
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
 
 
 class PipelineTab(BaseWidget):
@@ -42,6 +95,7 @@ class PipelineTab(BaseWidget):
         self.pending_jobs: list[PipelineJob] = []
         self.completed_jobs = 0
         self.total_jobs = 0
+        self._workdir_auto = True
         self._setup_ui()
 
     def _setup_ui(self):
@@ -54,10 +108,13 @@ class PipelineTab(BaseWidget):
 
         main_area = QtWidgets.QVBoxLayout()
 
-        file_row = QtWidgets.QHBoxLayout()
-        self.source_list = QtWidgets.QListWidget()
+        file_group = QtWidgets.QGroupBox("Input queue")
+        file_row = QtWidgets.QHBoxLayout(file_group)
+        self.source_list = FileDropListWidget()
         self.source_list.setObjectName("SourceList")
         self.source_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.source_list.setToolTip("Drop audio/video files here or use Choose files.")
+        self.source_list.files_dropped.connect(self._add_sources)
         pick_btn = QtWidgets.QPushButton("Choose files")
         pick_btn.clicked.connect(self._choose_source)
         remove_btn = QtWidgets.QPushButton("Remove selected")
@@ -71,14 +128,46 @@ class PipelineTab(BaseWidget):
         file_row.addWidget(self.source_list)
         file_row.addLayout(file_btns)
 
+        workdir_group = QtWidgets.QGroupBox("Output")
         workdir_row = QtWidgets.QHBoxLayout()
         self.workdir_edit = QtWidgets.QLineEdit()
+        self.workdir_edit.setPlaceholderText("Auto: creates a safe _jobs folder next to each input")
+        self.workdir_edit.textEdited.connect(self._mark_workdir_manual)
         workdir_btn = QtWidgets.QPushButton("Workdir folder")
         workdir_btn.clicked.connect(self._choose_workdir)
         workdir_row.addWidget(self.workdir_edit)
         workdir_row.addWidget(workdir_btn)
+        workdir_group.setLayout(workdir_row)
 
         self.romaji_check = QtWidgets.QCheckBox("Generate romaji")
+        self.model_size_edit = QtWidgets.QLineEdit()
+        self.beam_size_spin = QtWidgets.QSpinBox()
+        self.beam_size_spin.setRange(1, 20)
+        self.vad_check = QtWidgets.QCheckBox()
+        self.mono_check = QtWidgets.QCheckBox()
+        self.subtitle_fmt_combo = QtWidgets.QComboBox()
+        self.subtitle_fmt_combo.addItems(["srt", "vtt", "ass"])
+        self.word_ts_check = QtWidgets.QCheckBox()
+        self.thread_spin = QtWidgets.QSpinBox()
+        self.thread_spin.setRange(0, 64)
+        self.compute_combo = QtWidgets.QComboBox()
+        self.compute_combo.addItems(["default", "float16", "int8", "int8_float16"])
+        self.extra_args_edit = QtWidgets.QPlainTextEdit()
+        self.extra_args_edit.setPlaceholderText("Optional faster-whisper args, e.g. condition_on_previous_text=false")
+        self.extra_args_edit.setMaximumHeight(72)
+
+        options_group = QtWidgets.QGroupBox("Pipeline options")
+        options_form = QtWidgets.QFormLayout(options_group)
+        options_form.addRow("Model", self.model_size_edit)
+        options_form.addRow("Beam size", self.beam_size_spin)
+        options_form.addRow("VAD silence filter", self.vad_check)
+        options_form.addRow("Force mono audio", self.mono_check)
+        options_form.addRow("Subtitle format", self.subtitle_fmt_combo)
+        options_form.addRow("Romaji subtitles", self.romaji_check)
+        options_form.addRow("Word timestamps", self.word_ts_check)
+        options_form.addRow("CPU threads (0=auto)", self.thread_spin)
+        options_form.addRow("Compute type", self.compute_combo)
+        options_form.addRow("Extra ASR args", self.extra_args_edit)
 
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setObjectName("MainProgressBar")
@@ -105,9 +194,9 @@ class PipelineTab(BaseWidget):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_job)
 
-        main_area.addLayout(file_row)
-        main_area.addLayout(workdir_row)
-        main_area.addWidget(self.romaji_check)
+        main_area.addWidget(file_group)
+        main_area.addWidget(workdir_group)
+        main_area.addWidget(options_group)
         main_area.addLayout(progress_box)
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addWidget(self.run_btn)
@@ -128,7 +217,11 @@ class PipelineTab(BaseWidget):
     def _choose_workdir(self):  # pragma: no cover - GUI
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Workdir")
         if path:
+            self._workdir_auto = False
             self.workdir_edit.setText(path)
+
+    def _mark_workdir_manual(self) -> None:  # pragma: no cover - GUI
+        self._workdir_auto = False
 
     def _start_job(self):  # pragma: no cover - GUI
         sources = [Path(self.source_list.item(i).text()) for i in range(self.source_list.count())]
@@ -138,12 +231,18 @@ class PipelineTab(BaseWidget):
 
         workdir_text = self.workdir_edit.text()
         workdir = Path(workdir_text) if workdir_text else None
+        multi_source = len(sources) > 1
 
-        self.pending_jobs = [self._build_job(source, workdir) for source in sources]
+        self.pending_jobs = [
+            self._build_job(source, self._resolve_workdir_for_source(source, workdir, multi_source))
+            for source in sources
+        ]
         self.completed_jobs = 0
         self.total_jobs = len(self.pending_jobs)
 
         self.log_view.append(f"Queued {self.total_jobs} job(s). Starting...")
+        if multi_source and workdir:
+            self.log_view.append("Batch mode: each source will use its own subfolder inside the selected workdir.")
         self.progress_bar.setValue(0)
         self.stage_label.setText("Preparing...")
         self.detail_label.setText("")
@@ -156,6 +255,15 @@ class PipelineTab(BaseWidget):
 
     def _on_failed(self, msg: str):  # pragma: no cover - GUI
         self.log_view.append(f"Error: {msg}")
+        self.stage_label.setText("Error")
+        self.detail_label.setText(msg)
+        self.pending_jobs = []
+        self._finalize_controls()
+
+    def _on_cancelled(self):  # pragma: no cover - GUI
+        self.log_view.append("Queue cancelled")
+        self.stage_label.setText("Cancelled")
+        self.detail_label.setText("")
         self.pending_jobs = []
         self._finalize_controls()
 
@@ -172,7 +280,6 @@ class PipelineTab(BaseWidget):
     def _finalize_controls(self):  # pragma: no cover - GUI
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self._set_progress_visible(False)
 
     def _cancel_job(self):  # pragma: no cover - GUI
         if hasattr(self, "_worker"):
@@ -186,19 +293,39 @@ class PipelineTab(BaseWidget):
 
     def _choose_source(self):  # pragma: no cover - GUI
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(self, "Choose files")
+        self._add_sources(paths)
+
+    def _add_sources(self, paths: list[str | Path]):  # pragma: no cover - GUI
+        added = False
         for path in paths:
-            if not any(self.source_list.item(i).text() == path for i in range(self.source_list.count())):
-                self.source_list.addItem(path)
-        if paths and not self.workdir_edit.text():
-            suggestion = default_workdir_for_input(Path(paths[0]))
-            self.workdir_edit.setText(str(suggestion))
+            path_text = str(path)
+            if not path_text:
+                continue
+            if not any(self.source_list.item(i).text() == path_text for i in range(self.source_list.count())):
+                self.source_list.addItem(path_text)
+                added = True
+        if added and self._workdir_auto:
+            self._update_auto_workdir()
 
     def _remove_selected_sources(self):  # pragma: no cover - GUI
         for item in self.source_list.selectedItems():
             self.source_list.takeItem(self.source_list.row(item))
+        if self._workdir_auto:
+            self._update_auto_workdir()
 
     def _clear_sources(self):  # pragma: no cover - GUI
         self.source_list.clear()
+        if self._workdir_auto:
+            self.workdir_edit.clear()
+
+    def _update_auto_workdir(self):  # pragma: no cover - GUI
+        sources = [Path(self.source_list.item(i).text()) for i in range(self.source_list.count())]
+        if not sources:
+            self.workdir_edit.clear()
+        elif len(sources) == 1:
+            self.workdir_edit.setText(str(default_workdir_for_input(sources[0])))
+        else:
+            self.workdir_edit.setText(str(sources[0].parent / "_jobs"))
 
     def _start_next_job(self):  # pragma: no cover - GUI
         if not self.pending_jobs:
@@ -207,6 +334,8 @@ class PipelineTab(BaseWidget):
         self.log_view.append(
             f"Starting job {self.completed_jobs + 1}/{self.total_jobs}: {job.source.name if job.source else 'Unknown'}"
         )
+        if job.workdir:
+            self.log_view.append(f"Workdir: {job.workdir}")
         self.progress_bar.setValue(0)
         self.stage_label.setText("Preparing...")
         self.detail_label.setText("")
@@ -214,6 +343,7 @@ class PipelineTab(BaseWidget):
         self._worker = worker
         worker.signals.log.connect(self.log_view.append)
         worker.signals.failed.connect(self._on_failed)
+        worker.signals.cancelled.connect(self._on_cancelled)
         worker.signals.results.connect(self._populate_results)
         worker.signals.finished.connect(self._on_finished)
         worker.signals.progress.connect(self.progress_bar.setValue)
@@ -230,23 +360,32 @@ class PipelineTab(BaseWidget):
         job.workdir = workdir or default_workdir_for_input(source)
         self.cfg = load_app_state()
         defaults = self.cfg.defaults
-        job.model_size = defaults.model_size
-        job.beam_size = defaults.beam_size
-        job.vad = defaults.vad
-        job.mono = defaults.mono
+        job.model_size = self.model_size_edit.text().strip() or defaults.model_size
+        job.beam_size = self.beam_size_spin.value()
+        job.vad = self.vad_check.isChecked()
+        job.mono = self.mono_check.isChecked()
         job.generate_romaji = self.romaji_check.isChecked()
-        job.fmt = defaults.subtitle_format
+        job.fmt = self.subtitle_fmt_combo.currentText()
         job.best_of = defaults.best_of
         job.patience = defaults.patience
         job.length_penalty = defaults.length_penalty
-        job.word_timestamps = defaults.word_timestamps
-        job.threads = defaults.threads
-        job.compute_type = defaults.compute_type
+        job.word_timestamps = self.word_ts_check.isChecked()
+        job.threads = self.thread_spin.value() or defaults.threads
+        compute_type = self.compute_combo.currentText()
+        job.compute_type = None if compute_type == "default" else compute_type
         extra_args = dict(defaults.extra_asr_args or {})
+        extra_args.update(parse_extra_args(self.extra_args_edit.toPlainText()) or {})
         extra_args["suppress_blank"] = defaults.suppress_blank
         extra_args["suppress_tokens"] = defaults.suppress_tokens
         job.extra_asr_args = extra_args
         return job
+
+    def _resolve_workdir_for_source(self, source: Path, base_workdir: Path | None, multi_source: bool) -> Path:
+        if not base_workdir:
+            return default_workdir_for_input(source)
+        if not multi_source:
+            return base_workdir
+        return base_workdir / _safe_path_component(source.stem)
 
     def _reset_stage_list(self):  # pragma: no cover - GUI
         for i in range(self.stage_list.count()):
@@ -267,7 +406,26 @@ class PipelineTab(BaseWidget):
     def _sync_from_cfg(self):
         """Mirror saved defaults into the pipeline form."""
         self.cfg = load_app_state()
+        defaults = self.cfg.defaults
         self.romaji_check.setChecked(False)
+        self.model_size_edit.setText(defaults.model_size)
+        self.beam_size_spin.setValue(defaults.beam_size)
+        self.vad_check.setChecked(defaults.vad)
+        self.mono_check.setChecked(defaults.mono)
+        fmt_idx = self.subtitle_fmt_combo.findText(defaults.subtitle_format)
+        if fmt_idx >= 0:
+            self.subtitle_fmt_combo.setCurrentIndex(fmt_idx)
+        self.word_ts_check.setChecked(defaults.word_timestamps)
+        self.thread_spin.setValue(defaults.threads or 0)
+        compute_idx = self.compute_combo.findText(defaults.compute_type or "default")
+        if compute_idx >= 0:
+            self.compute_combo.setCurrentIndex(compute_idx)
+        self.extra_args_edit.setPlainText(self._format_extra_args(defaults.extra_asr_args))
+
+    def _format_extra_args(self, extra_args: dict[str, object] | None) -> str:
+        if not extra_args:
+            return ""
+        return "\n".join(f"{key}={value}" for key, value in extra_args.items())
 
 
 class FinalizeTab(BaseWidget):
@@ -420,6 +578,7 @@ class FinalizeTab(BaseWidget):
         worker = FinalizeWorker(job)
         worker.signals.log.connect(self.log_view.append)
         worker.signals.failed.connect(self._on_failed)
+        worker.signals.cancelled.connect(self._on_cancelled)
         worker.signals.results.connect(self._on_results)
         worker.signals.finished.connect(self._finalize_controls)
         self.run_btn.setEnabled(False)
@@ -429,6 +588,10 @@ class FinalizeTab(BaseWidget):
 
     def _on_failed(self, msg: str) -> None:  # pragma: no cover - GUI
         self.log_view.append(f"Error: {msg}")
+        self._finalize_controls()
+
+    def _on_cancelled(self) -> None:  # pragma: no cover - GUI
+        self.log_view.append("Cancelled")
         self._finalize_controls()
 
     def _on_results(self, items: list[Path]) -> None:  # pragma: no cover - GUI
@@ -606,7 +769,6 @@ STAGES = [
     "Transcribe",
     "Romanize",
     "Export",
-    "Finalize",
 ]
 
 
@@ -650,7 +812,7 @@ class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignor
             raise RuntimeError("PySide6 is required for the GUI")
         super().__init__()
 
-        self.setWindowTitle("jp2subs — Japanese → Subtitles")
+        self.setWindowTitle("jp2subs - Japanese Subtitles")
         self.resize(1180, 760)
         self._init_ui()
         self._init_status_bar()
@@ -728,7 +890,7 @@ class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignor
         title_label = QtWidgets.QLabel("jp2subs")
         title_label.setObjectName("TitleLabel")
         subtitle_label = QtWidgets.QLabel(
-            "Transcribe, romanize, translate, and subtitle Japanese audio/video."
+            "Transcribe, romanize, and subtitle Japanese audio/video."
         )
         subtitle_label.setObjectName("SubtitleLabel")
         subtitle_label.setWordWrap(True)
@@ -776,7 +938,7 @@ class MainWindow(QtWidgets.QMainWindow if QtWidgets else object):  # type: ignor
             (
                 "jp2subs GUI\n\n"
                 "CLI and GUI pipeline for Japanese transcription, romanization, "
-                "translation, and subtitle generation.\n\n"
+                "and subtitle generation.\n\n"
                 "Powered by PySide6 and open-source components."
             ),
         )

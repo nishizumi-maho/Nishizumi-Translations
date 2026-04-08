@@ -1,6 +1,7 @@
 """Shared pipeline runner for CLI and GUI."""
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
@@ -25,6 +26,7 @@ class PipelineCallbacks:
     on_error: Callable[[str, Exception], None] | None = None
     on_item_start: Callable[[Path], None] | None = None
     on_item_done: Callable[[Path, List[Path]], None] | None = None
+    on_subprocess: Callable[[subprocess.Popen], None] | None = None
 
 
 class PipelineRunner:
@@ -38,6 +40,7 @@ class PipelineRunner:
         self._cancelled = True
 
     def run(self, job) -> List[Path]:
+        self._ensure_not_cancelled()
         if not job.source:
             raise RuntimeError("Source file missing")
         source = Path(job.source)
@@ -81,6 +84,7 @@ class PipelineRunner:
             workdir,
             mono=job.mono,
             on_progress=self._emit_progress,
+            register_subprocess=self.callbacks.on_subprocess,
         )
 
     def _transcribe(self, audio_path: Path, job):
@@ -138,10 +142,12 @@ class PipelineRunner:
         return output_path
 
     def _stage(self, name: str, fn):
+        self._ensure_not_cancelled()
         if self.callbacks.on_stage_start:
             self.callbacks.on_stage_start(name)
         self._emit_progress(ProgressEvent(stage=name, percent=self._stage_percent(name, 0), message=f"{name}..."))
         result = fn()
+        self._ensure_not_cancelled()
         if self.callbacks.on_stage_done:
             self.callbacks.on_stage_done(name)
         self._emit_progress(ProgressEvent(stage=name, percent=self._stage_percent(name, 1), message=f"{name} done"))
@@ -157,3 +163,7 @@ class PipelineRunner:
 
     def _stage_percent(self, stage: str, fraction: float) -> int:
         return stage_percent(stage, fraction)
+
+    def _ensure_not_cancelled(self) -> None:
+        if self._cancelled:
+            raise RuntimeError("Job cancelled")

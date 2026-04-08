@@ -6,10 +6,9 @@ from typing import Dict, Tuple
 
 STAGE_RANGES: Dict[str, Tuple[int, int]] = {
     "Ingest": (0, 10),
-    "Transcribe": (10, 70),
-    "Romanize": (70, 80),
-    "Translate": (80, 95),
-    "Export": (95, 100),
+    "Transcribe": (10, 80),
+    "Romanize": (80, 90),
+    "Export": (90, 100),
 }
 
 

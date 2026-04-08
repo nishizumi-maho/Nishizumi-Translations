@@ -7,6 +7,7 @@ from typing import Callable
 
 from rich.console import Console
 
+from .config import resolve_media_tool
 from .io import ensure_workdir
 from .progress import ProgressEvent, stage_percent
 
@@ -87,13 +88,16 @@ def run_command(
 ) -> None:
     """Run a subprocess and raise on failure."""
 
+    resolved_cmd = [resolve_media_tool(cmd[0]), *cmd[1:]] if cmd else cmd
     try:
-        proc = subprocess.Popen(cmd)
+        proc = subprocess.Popen(resolved_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if register_subprocess:
             register_subprocess(proc)
         stdout, stderr = proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(f"{title} failed with exit code {proc.returncode}")
+            detail = _summarize_process_output(stdout, stderr)
+            suffix = f"\n{detail}" if detail else ""
+            raise RuntimeError(f"{title} failed with exit code {proc.returncode}{suffix}")
     except FileNotFoundError as exc:
         raise RuntimeError(f"{title} failed: binary not found (is it on PATH?)") from exc
     except RuntimeError:
@@ -101,3 +105,10 @@ def run_command(
     except Exception as exc:  # pragma: no cover - unexpected
         raise RuntimeError(f"{title} failed: {exc}") from exc
 
+
+def _summarize_process_output(stdout: str | None, stderr: str | None) -> str:
+    combined = "\n".join(part.strip() for part in [stderr, stdout] if part and part.strip())
+    if not combined:
+        return ""
+    lines = combined.splitlines()
+    return "\n".join(lines[-8:])

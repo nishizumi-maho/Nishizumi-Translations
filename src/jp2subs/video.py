@@ -4,9 +4,10 @@ from __future__ import annotations
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from .audio import run_command
+from .config import resolve_media_tool
 
 
 def _normalize_suffix(suffix: str | None) -> str:
@@ -118,6 +119,7 @@ def run_ffmpeg_mux_soft(
     container: str,
     lang: str | None = None,
     verbose: bool = False,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> Path:
     if Path(out_path).resolve() == Path(video).resolve():
         raise ValueError("Output path matches input video; choose a different output file.")
@@ -147,7 +149,10 @@ def run_ffmpeg_mux_soft(
     cmd.append(str(out_path))
     if verbose:
         print("[ffmpeg mux]", " ".join(cmd))
-    run_command(cmd, "ffmpeg mux")
+    if register_subprocess:
+        run_command(cmd, "ffmpeg mux", register_subprocess=register_subprocess)
+    else:
+        run_command(cmd, "ffmpeg mux")
     return Path(out_path)
 
 
@@ -162,6 +167,7 @@ def run_ffmpeg_burn(
     styles: Optional[Dict[str, str]] = None,
     fonts_dir: Optional[Path] = None,
     verbose: bool = False,
+    register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> Path:
     subtitles_filter = _build_subtitles_filter(Path(subtitle), font, styles, fonts_dir)
     cmd = [
@@ -183,7 +189,10 @@ def run_ffmpeg_burn(
     ]
     if verbose:
         print("[ffmpeg burn]", " ".join(cmd))
-    run_command(cmd, "ffmpeg burn")
+    if register_subprocess:
+        run_command(cmd, "ffmpeg burn", register_subprocess=register_subprocess)
+    else:
+        run_command(cmd, "ffmpeg burn")
     return Path(out_path)
 
 
@@ -217,7 +226,7 @@ def ffmpeg_version() -> str:
 
     try:
         result = subprocess.run(
-            ["ffmpeg", "-version"], check=True, capture_output=True, text=True
+            [resolve_media_tool("ffmpeg"), "-version"], check=True, capture_output=True, text=True
         )
     except FileNotFoundError as exc:  # pragma: no cover - exercised via error path tests
         raise RuntimeError("ffmpeg not found on PATH") from exc
