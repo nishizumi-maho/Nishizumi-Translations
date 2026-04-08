@@ -106,5 +106,6 @@ def test_ffmpeg_version(monkeypatch):
         return DummyResult("ffmpeg version n4.4\n")
 
     monkeypatch.setattr(video.subprocess, "run", fake_run)
+    monkeypatch.setattr(video, "resolve_media_tool", lambda binary: binary)
 
     assert video.ffmpeg_version() == "ffmpeg version n4.4"

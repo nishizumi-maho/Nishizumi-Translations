@@ -5,7 +5,7 @@ import json
 import os
 import re
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Dict
 
@@ -34,9 +34,9 @@ def app_config_dir() -> Path:
 
 @dataclass
 class TranslationConfig:
-    mode: str = "llm"
-    provider: str = "local"
-    target_languages: list[str] = field(default_factory=lambda: ["en"])
+    mode: str = "disabled"
+    provider: str = "external"
+    target_languages: list[str] = field(default_factory=list)
     api_url: str | None = None
     api_key: str | None = None
     llama_binary: str | None = None
@@ -69,8 +69,8 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
-        translation = data.get("translation", {})
-        defaults = data.get("defaults", {})
+        translation = _filter_dataclass_fields(TranslationConfig, data.get("translation", {}))
+        defaults = _filter_dataclass_fields(DefaultsConfig, data.get("defaults", {}))
         return cls(
             ffmpeg_path=data.get("ffmpeg_path"),
             translation=TranslationConfig(**translation),
@@ -91,6 +91,33 @@ def detect_ffmpeg(configured_path: str | None = None) -> str | None:
     if configured_path:
         return configured_path
     return shutil.which("ffmpeg")
+
+
+def detect_ffprobe(configured_ffmpeg_path: str | None = None) -> str | None:
+    """Return the ffprobe binary path, preferring the configured ffmpeg folder."""
+
+    if configured_ffmpeg_path:
+        ffmpeg_path = Path(configured_ffmpeg_path)
+        candidate_name = "ffprobe.exe" if ffmpeg_path.suffix.lower() == ".exe" else "ffprobe"
+        sibling = ffmpeg_path.with_name(candidate_name)
+        if sibling.exists():
+            return str(sibling)
+    return shutil.which("ffprobe")
+
+
+def resolve_media_tool(binary: str) -> str:
+    """Resolve ffmpeg/ffprobe through saved config while leaving other commands unchanged."""
+
+    name = Path(binary).name.lower()
+    if name not in {"ffmpeg", "ffmpeg.exe", "ffprobe", "ffprobe.exe"}:
+        return binary
+
+    cfg = load_config()
+    if not cfg.ffmpeg_path:
+        return binary
+    if name in {"ffmpeg", "ffmpeg.exe"}:
+        return detect_ffmpeg(cfg.ffmpeg_path) or binary
+    return detect_ffprobe(cfg.ffmpeg_path) or binary
 
 
 def load_config(path: Path | None = None) -> AppConfig:
@@ -167,7 +194,7 @@ def _to_toml(data: Dict[str, Any]) -> str:
             lines.append(f"{key} = {value}")
         elif isinstance(value, dict):
             inner = ", ".join(
-                f"{inner_key} = \"{_escape_basic_string(inner_val)}\"" for inner_key, inner_val in value.items()
+                f"{inner_key} = \"{_escape_basic_string(str(inner_val))}\"" for inner_key, inner_val in value.items()
             )
             lines.append(f"{key} = {{{inner}}}")
         else:
@@ -180,3 +207,10 @@ def _escape_basic_string(value: str) -> str:
     """Escape backslashes and quotes for TOML basic strings."""
 
     return value.replace("\\", "\\\\").replace("\"", "\\\"")
+
+
+def _filter_dataclass_fields(dataclass_type: type, data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    allowed = {field.name for field in fields(dataclass_type)}
+    return {key: value for key, value in data.items() if key in allowed}

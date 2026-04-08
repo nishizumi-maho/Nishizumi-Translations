@@ -7,6 +7,7 @@ from typing import Callable, Iterable, List, Optional
 
 from rich.console import Console
 
+from .config import resolve_media_tool
 from .models import MasterDocument, Meta, Segment
 from .progress import ProgressEvent, format_clock, transcribe_time_percent
 
@@ -160,7 +161,7 @@ def _iter_segments(segments_iter: Iterable) -> Iterable[dict]:
 
 def _probe_duration(audio_path: Path) -> float:
     cmd = [
-        "ffprobe",
+        resolve_media_tool("ffprobe"),
         "-v",
         "error",
         "-show_entries",

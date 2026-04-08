@@ -43,7 +43,14 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
         doc.add_romaji(["konnichiwa"])
         return doc
 
-    def fake_write_subtitles(doc: MasterDocument, path: Path, fmt: str, lang: str, secondary: str | None = None):
+    def fake_write_subtitles(
+        doc: MasterDocument,
+        path: Path,
+        fmt: str,
+        lang: str,
+        secondary: str | None = None,
+        **_: object,
+    ):
         calls.append("export")
         path.write_text(f"{fmt}-{lang}-{secondary or ''}", encoding="utf-8")
         return path
@@ -71,7 +78,7 @@ def test_wizard_runs_pipeline(tmp_path, monkeypatch):
     result = runner.invoke(cli.app, ["wizard"], input=inputs + "\n")
 
     assert result.exit_code == 0, result.output
-    assert calls == ["ingest", "transcribe", "romanize", "export"]
+    assert calls == ["ingest", "transcribe", "romanize", "export", "export"]
 
     exported = workdir / "subs_ja.srt"
     assert exported.exists()
@@ -96,7 +103,14 @@ def test_wizard_handles_transcription_only(tmp_path, monkeypatch):
         calls.append("transcribe")
         return _dummy_doc()
 
-    def fake_write_subtitles(doc: MasterDocument, path: Path, fmt: str, lang: str, secondary: str | None = None):
+    def fake_write_subtitles(
+        doc: MasterDocument,
+        path: Path,
+        fmt: str,
+        lang: str,
+        secondary: str | None = None,
+        **_: object,
+    ):
         calls.append("export")
         path.write_text(f"{fmt}-{lang}-{secondary or ''}", encoding="utf-8")
         return path
