@@ -14,6 +14,21 @@ from .progress import ProgressEvent, format_clock, transcribe_time_percent
 console = Console()
 
 
+def resolve_model_source(model_size: str) -> str:
+    """Point faster-whisper at a model the app already downloaded, when we have one.
+
+    Returning an absolute folder keeps transcription fully offline. If the name
+    is not one we manage (a custom CTranslate2 folder, say) it passes straight
+    through and faster-whisper resolves it as usual.
+    """
+
+    try:
+        from .runtime.manager import manager
+    except Exception:  # pragma: no cover - runtime package always ships with the app
+        return model_size
+    return manager.resolve_model(model_size)
+
+
 def transcribe_audio(
     audio_path: str | Path,
     model_size: str = "large-v3",
@@ -38,7 +53,8 @@ def transcribe_audio(
         from faster_whisper import WhisperModel
     except Exception as exc:  # pragma: no cover - optional dependency
         raise RuntimeError(
-            "faster-whisper is required for transcription. Install with 'pip install jp2subs[asr]'"
+            "faster-whisper is required for transcription. Install it with "
+            "'pip install \"jp2subs[asr]\"', or use the packaged Windows build which bundles it."
         ) from exc
 
     audio_path = Path(audio_path)
@@ -49,7 +65,7 @@ def transcribe_audio(
     audio_duration = _probe_duration(audio_path)
     model = _create_model_with_fallback(
         WhisperModel,
-        model_size=model_size,
+        model_size=resolve_model_source(model_size),
         device=device,
         threads=threads,
         compute_type=compute_type,
@@ -122,6 +138,16 @@ def transcribe_audio(
     return MasterDocument(meta=meta, segments=segments)
 
 
+def _activate_gpu_libraries() -> None:
+    """Add the app-managed cuBLAS/cuDNN folder to the DLL search path."""
+
+    try:
+        from .runtime.manager import manager
+    except Exception:  # pragma: no cover - runtime package always ships with the app
+        return
+    manager.activate_cuda()
+
+
 def _create_model_with_fallback(
     WhisperModel, *, model_size: str, device: Optional[str], threads: int | None = None, compute_type: str | None = None
 ):
@@ -131,9 +157,17 @@ def _create_model_with_fallback(
         kwargs = {}
         if threads:
             kwargs["cpu_threads"] = threads
-        if compute_type:
-            kwargs["compute_type"] = compute_type
+        effective_compute = compute_type
+        if target == "cpu" and effective_compute in {"float16", "int8_float16"}:
+            # CPU kernels have no float16 path; picking int8 keeps the run alive.
+            console.print(f"compute_type='{effective_compute}' is GPU-only; using 'int8' on CPU")
+            effective_compute = "int8"
+        if effective_compute:
+            kwargs["compute_type"] = effective_compute
         return WhisperModel(model_size, device=target, **kwargs)
+
+    if normalized_device in {"auto", "cuda"}:
+        _activate_gpu_libraries()
 
     if normalized_device == "auto":
         try:

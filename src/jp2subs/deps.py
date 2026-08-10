@@ -179,14 +179,53 @@ def install_llama(console: Console) -> Path:
 
 
 def doctor(console: Console) -> int:
+    from .runtime import store
+    from .runtime.manager import manager
+
     issues: list[str] = []
     cfg = config.load_config()
 
+    console.print(f"Component folder: [bold]{store.data_dir()}[/bold]")
+    total = manager.total_size()
+    console.print(f"Installed size: {store.human_size(total)}" if total else "Nothing downloaded yet.")
+
     ffmpeg_path = config.detect_ffmpeg(cfg.ffmpeg_path)
     if not ffmpeg_path:
-        issues.append("ffmpeg not found. Install ffmpeg and ensure it is on PATH or set ffmpeg_path in config.toml.")
+        issues.append(
+            "ffmpeg not found. Run 'jp2subs setup' (or 'jp2subs components install ffmpeg') "
+            "to let jp2subs download it."
+        )
     else:
         console.print(f"[green]ffmpeg detected:[/green] {ffmpeg_path}")
+
+    ffprobe_path = config.detect_ffprobe(cfg.ffmpeg_path)
+    if not ffprobe_path:
+        issues.append("ffprobe not found next to ffmpeg. Reinstall ffmpeg with 'jp2subs components install ffmpeg'.")
+    else:
+        console.print(f"[green]ffprobe detected:[/green] {ffprobe_path}")
+
+    installed_models = manager.installed_models()
+    if not installed_models:
+        issues.append(
+            "No speech model installed. Run 'jp2subs setup' or 'jp2subs components install large-v3-turbo'."
+        )
+    else:
+        for model in installed_models:
+            console.print(f"[green]model installed:[/green] {model.name} ({model.model_alias})")
+
+    if manager.cuda_bin_dir():
+        console.print("[green]GPU acceleration libraries installed.[/green]")
+
+    try:
+        import faster_whisper  # noqa: F401
+    except ImportError:
+        # Escaped for rich, which would otherwise read [asr] as a style tag.
+        issues.append(
+            "faster-whisper is not importable. Install it with 'pip install \"jp2subs\\[asr]\"' "
+            "(the packaged Windows build bundles it already)."
+        )
+    else:
+        console.print("[green]faster-whisper available.[/green]")
 
     if cfg.translation.provider.lower() == "local":
         llama_binary = cfg.translation.llama_binary

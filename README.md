@@ -1,285 +1,228 @@
-# Nishizumi-Translations - jp2subs
+# Nishizumi Translations
 
 ![unnamed](https://github.com/user-attachments/assets/210bd1f7-f8b0-4cba-aa75-e89a92796484)
 
-`jp2subs` is a Windows-friendly CLI/GUI tool that turns Japanese audio or video into transcripts and subtitle files. The current project focuses on ingestion, ASR with `faster-whisper`, optional romaji generation, subtitle export, and final video delivery with `ffmpeg`.
+Turn Japanese audio and video into transcripts and subtitle files. Drop a file in, pick a model, get `srt`/`vtt`/`ass` out — then attach, embed or burn the result into your video.
 
-Built-in translation is no longer part of the main workflow. The app now produces Japanese transcripts/subtitles cleanly, and you can translate those outputs with your own local LLM, DeepL, or ChatGPT workflow if needed.
+**There is nothing to install by hand.** The app downloads and installs its own Whisper models, its own FFmpeg, and (optionally) the NVIDIA GPU libraries. You choose what you want from the **Components** page and it handles the rest.
 
-## Highlights
-- Accepts common video formats (`mp4`, `mkv`, `webm`, `mov`, `avi`) and audio formats (`flac`, `mp3`, `wav`, `m4a`, `mka`).
-- Extracts audio with `ffmpeg` to FLAC 48 kHz.
-- Transcribes Japanese audio with `faster-whisper`.
-- Optionally adds romaji with `pykakasi`.
-- Exports subtitles as `srt`, `vtt`, or `ass`.
-- Finalizes outputs as sidecar subtitles, soft-muxed video, or hard-burned video.
-- GUI supports drag and drop, multi-file queues, stage progress, cancellation, and advanced ASR overrides.
-- Saved `ffmpeg_path` in the Settings tab is used by both `ffmpeg` and `ffprobe`.
+> The Python package and command line tool are still called `jp2subs`.
 
-## Requirements
-- Python 3.11+
-- `ffmpeg`
-- Optional but recommended for the full app:
-  - `PySide6` for the GUI
-  - `faster-whisper` for transcription
+## Install
 
-`ffmpeg` can be on your `PATH`, or you can point the GUI to it later in the **Settings** tab.
+### Windows (recommended)
 
-## Installation
-### 1) Clone the repository
+Download `Nishizumi-Translations-Setup-<version>.exe` from the [latest release](https://github.com/nishizumi-maho/Nishizumi-Translations/releases/latest) and run it.
+
+- Installs per user, so there is no admin prompt.
+- On first launch a short setup screen offers FFmpeg and a speech model.
+- The app checks for new versions on startup and can update itself from the **About** page.
+
+### From source (any platform)
+
 ```bash
 git clone https://github.com/nishizumi-maho/Nishizumi-Translations.git
 cd Nishizumi-Translations
-```
-
-### 2) Create a virtual environment
-**Windows (PowerShell):**
-```powershell
 python -m venv .venv
-.venv\Scripts\activate
 ```
 
-**macOS/Linux:**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+Activate it — Windows `\.venv\Scripts\activate`, macOS/Linux `source .venv/bin/activate` — then:
 
-### 3) Install the project
-For the standard GUI + ASR workflow:
 ```bash
 pip install -e ".[gui,asr]"
-```
-
-If you only want the CLI without the GUI:
-```bash
-pip install -e ".[asr]"
-```
-
-### 4) Check ffmpeg
-```bash
-ffmpeg -version
-```
-
-If the command is not found:
-- Windows: install `ffmpeg` and add its `bin` folder to `PATH`
-- macOS: `brew install ffmpeg`
-- Linux: use your package manager, for example `sudo apt install ffmpeg`
-
-## Launching the app
-```bash
-# Desktop GUI
+jp2subs setup
 jp2subs ui
-
-# Interactive CLI wizard
-jp2subs wizard
 ```
 
-## GUI workflow
-### Pipeline tab
-1. Launch `jp2subs ui`.
-2. Drop one or more files into the **Input queue**, or click **Choose files**.
-3. Leave **Workdir** blank to use the automatic `_jobs/<file-stem>` folder next to the input.
-4. If you choose a custom workdir and queue multiple files, the app creates one subfolder per source file to avoid output collisions.
-5. Adjust the pipeline options you want:
-   - model
-   - beam size
-   - VAD
-   - mono/stereo ingest
-   - subtitle format
-   - romaji generation
-   - word timestamps
-   - CPU threads
-   - compute type
-   - extra ASR args
-6. Click **Run**.
-7. Watch the stage list and log panel while ingest, transcription, romaji, and export run.
-8. If needed, click **Cancel queue**. The GUI now propagates cancellation to the running pipeline and active `ffmpeg` subprocesses where possible.
+`jp2subs setup` downloads FFmpeg and the recommended model. Requires Python 3.11+.
 
-### Finalize tab
-Use the **Finalize** tab when you already have a subtitle file and want to:
-- create a sidecar subtitle
-- soft-mux subtitles into a video container
-- hard-burn subtitles into a new video
+## Using the app
 
-The finalize screen also exposes subtitle styling controls for burn-in, including:
-- font
-- size
-- bold/italic
-- outline/shadow
-- alignment
-- margin
-- primary/background color
+The window has five sections down the left side.
 
-### Settings tab
-Use **Settings** to manage default behavior:
-- `ffmpeg_path`
-- default model size
-- beam size
-- VAD
-- mono ingest
-- subtitle format
-- advanced ASR defaults such as:
-  - best-of
-  - patience
-  - length penalty
-  - word timestamps
-  - threads
-  - compute type
-  - suppress blank
-  - suppress tokens
-  - extra ASR args
+### Transcribe
 
-Settings are saved to:
-- Windows: `%APPDATA%/jp2subs/config.toml`
-- non-Windows: `~/.config/jp2subs/config.toml`
+1. Drop audio or video onto the panel, or click **Choose files**. Queue as many as you like.
+2. Pick a **Model**. Only installed models are listed; **Download another model…** jumps to Components.
+3. Choose the subtitle format, and tick **Romaji** if you want a romaji track alongside the Japanese one.
+4. Leave **Output folder** blank to get a `_jobs/<filename>` folder next to each input. With several files queued and a folder chosen, each file gets its own subfolder.
+5. **Advanced settings** holds the processing device, beam size, voice detection, CPU threads, compute type and raw faster-whisper arguments.
+6. Click **Start transcription**. The stage timeline shows Ingest → Transcribe → Romanize → Export with live progress, and **Cancel** stops the queue including any running FFmpeg process.
 
-The **Detect ffmpeg** button helps fill the path field, and the saved `ffmpeg_path` is also used to locate the matching `ffprobe`.
+### Finalize
 
-## CLI quickstart
+Takes a video plus an existing subtitle file and produces one of:
+
+- **Sidecar file** — copies the subtitle next to the video with a matching name. Instant.
+- **Soft-mux** — embeds it as a selectable track (MKV takes ASS or SRT, MP4 takes SRT or VTT). No re-encode.
+- **Burn in** — renders it permanently into the picture, with controls for font, size, colour (via a colour picker), outline, shadow, background box, position and margin, plus codec/CRF/preset.
+
+### Components
+
+Everything downloadable, with its size, what it is for, and whether it is installed:
+
+| Model | Download | Quality | Speed |
+| --- | --- | --- | --- |
+| Whisper Tiny | ~75 MB | Basic | Fastest |
+| Whisper Base | ~141 MB | Basic | Very fast |
+| Whisper Small | ~464 MB | Good | Fast |
+| Whisper Medium | ~1.4 GB | Very good | Moderate |
+| **Whisper Large v3 Turbo** | ~1.5 GB | Excellent | Fast |
+| Distil Whisper Large v3 | ~1.4 GB | Good | Fast |
+| Whisper Large v2 | ~2.9 GB | Excellent | Slow |
+| Whisper Large v3 | ~2.9 GB | Best | Slow |
+
+Large v3 Turbo is the recommended starting point: close to Large v3 accuracy at a fraction of the runtime. Distil Large v3 is tuned for English, so it trails the others on Japanese.
+
+Also here:
+
+- **FFmpeg** (~163 MB, required) — a static build, trimmed to `ffmpeg` and `ffprobe`.
+- **NVIDIA GPU acceleration** (~1.2 GB, optional, Windows x64) — the cuBLAS and cuDNN libraries that let transcription run on an NVIDIA card. Transcription works on CPU without it.
+
+Downloads resume if interrupted, can be cancelled, and are checked for free disk space first. **Remove** deletes a component again.
+
+Everything lands in a single folder:
+
+- Windows: `%LOCALAPPDATA%\jp2subs`
+- macOS: `~/Library/Application Support/jp2subs`
+- Linux: `$XDG_DATA_HOME/jp2subs` or `~/.local/share/jp2subs`
+
+Set `JP2SUBS_DATA_DIR` to put it somewhere else.
+
+### Settings
+
+Theme (dark or light, applied immediately), update preferences, an optional FFmpeg path override, and the defaults used for every new run. Saved to:
+
+- Windows: `%APPDATA%\jp2subs\config.toml`
+- other: `~/.config/jp2subs/config.toml`
+
+### About
+
+Version, project links, and the update flow: check, download, install. The installer replaces the running copy and needs no admin rights.
+
+## Command line
+
+The GUI is one command away — `jp2subs ui` — but everything is scriptable.
+
+### Setup and components
+
 ```bash
-# 1) Ingest media into a workdir
+jp2subs setup                          # ffmpeg + the recommended model
+jp2subs setup --model small --gpu      # a specific model, plus the CUDA libraries
+jp2subs components list                # what is installed, and what it costs
+jp2subs components install large-v3
+jp2subs components remove tiny
+jp2subs components path                # where downloads live
+jp2subs deps doctor                    # check the whole setup
+```
+
+`install` and `remove` accept `ffmpeg`, `cuda`, a model name like `large-v3-turbo`, or a full key like `model:large-v3-turbo`.
+
+### Updates
+
+```bash
+jp2subs update            # is there a newer release?
+jp2subs update --install  # download it and start the installer
+jp2subs --version
+```
+
+### Pipeline
+
+```bash
+# 1) Extract audio into a workdir
 jp2subs ingest input.mkv --workdir workdir
 
-# 2) Transcribe audio/video and generate master.json
-jp2subs transcribe workdir/audio.flac --workdir workdir --model-size large-v3
+# 2) Transcribe to master.json
+jp2subs transcribe workdir/audio.flac --workdir workdir --model-size large-v3-turbo
 
 # 3) Add romaji (optional)
 jp2subs romanize workdir/master.json --workdir workdir
 
-# 4) Export Japanese subtitles
-jp2subs export workdir/master.json --format ass --lang ja --out workdir/subs_ja.ass
+# 4) Export subtitles
+jp2subs export workdir/master.json --fmt ass --lang ja --out workdir/subs_ja.ass
 
-# 5) Finalize subtitles for playback/distribution
+# 5) Deliver
+jp2subs sidecar  input.mkv workdir/subs_ja.ass --out-dir releases
 jp2subs softcode input.mkv workdir/subs_ja.ass --same-name --container mkv
 jp2subs hardcode input.mkv workdir/subs_ja.ass --same-name --suffix .hard --crf 18
-jp2subs sidecar input.mkv workdir/subs_ja.ass --out-dir releases
 ```
 
-If you want to use a local converted Whisper model instead of a built-in model name, pass the local model path, for example:
+`--model-size` takes a catalog name (`tiny`, `small`, `medium`, `large-v2`, `large-v3`, `large-v3-turbo`, `distil-large-v3`) or a path to your own CTranslate2 folder. Installed models resolve to a local folder, so transcription runs offline.
 
-```text
-C:\model\whisper-jp-ct2
-```
-
-## Manual CLI usage
-### Ingest
-```bash
-jp2subs ingest <input> --workdir <folder> [--mono]
-```
-
-### Transcribe
-```bash
-jp2subs transcribe <input> --workdir <folder> --model-size large-v3 --device auto --vad --temperature 0 --beam-size 5
-```
-
-Key options:
-- `--model-size`: `tiny`, `small`, `medium`, `large-v3`, or a local CTranslate2 model path
-- `--device`: `auto`, `cuda`, or `cpu`
-- `--vad / --no-vad`
-- `--temperature`
-- `--beam-size`
-
-### Romanize
-```bash
-jp2subs romanize <workdir>/master.json --workdir <folder>
-```
-
-### Export
-```bash
-jp2subs export <workdir>/master.json --format ass --lang ja --out <path> --workdir <folder>
-```
-
-### Final subtitle delivery
-**Soft-mux**
-```bash
-jp2subs softcode <video> <subs> --container mkv --same-name --lang ja
-```
-
-**Hard-burn**
-```bash
-jp2subs hardcode <video> <subs> --same-name --suffix .hard --crf 18 --codec libx264 --preset slow
-```
-
-**Sidecar**
-```bash
-jp2subs sidecar <video> <subs> --out-dir <folder> --same-name
-```
-
-## Batch processing
-You can process many files from a folder with the CLI:
+### Batch and wizards
 
 ```bash
-jp2subs batch <input_dir> --ext "mp4,mkv,flac" --workdir workdir --model-size large-v3 --format srt
+jp2subs batch <input_dir> --ext "mp4,mkv,flac" --workdir workdir --fmt srt
+jp2subs wizard     # guided single-file run
+jp2subs finalize   # guided mux/burn/sidecar
 ```
 
-Useful flags:
-- `--ext`: comma-separated extensions
-- `--force`: re-run stages even if cache markers already exist
-- `--mono`: downmix during ingest
+## GPU acceleration
 
-## Finalize existing subtitles interactively
-```bash
-jp2subs finalize
-```
+Install **NVIDIA GPU acceleration** from Components, leave the device on **Automatic**, and transcription uses the GPU when one is present, falling back to CPU otherwise. The app adds the downloaded cuBLAS/cuDNN folder to its own library search path — nothing is installed system-wide and `PATH` is left alone.
 
-This opens the CLI finalize wizard for:
-- sidecar
-- softcode
-- hardcode
+Selecting a GPU-only compute type (`float16`) while running on CPU is silently downgraded to `int8` rather than failing.
 
-## Build a Windows executable
-The repository includes a PyInstaller helper script for building the GUI as a Windows app.
+## Translation
+
+Built-in translation is not part of the workflow. The app produces clean Japanese transcripts and subtitles; translate those with your own tooling.
+
+## Building
 
 ```powershell
 python build_executable.py --mode onedir --clean
 ```
 
-Output:
-- `dist/jp2subs-gui/`
+Produces `dist/NishizumiTranslations/`. To build the Windows installer you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php):
 
-Notes:
-- `onedir` is the recommended mode for the current project.
-- Install the dependencies you want bundled before building, especially `.[gui,asr]`.
-- The generated `dist/` and `build/` folders are ignored by Git.
+```powershell
+iscc /DMyAppVersion=2.1.0 installer\jp2subs.iss
+```
+
+Which writes `dist/installer/Nishizumi-Translations-Setup-2.1.0.exe`.
+
+Releases are automated: pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds the bundle, compiles the installer, and attaches it plus a SHA-256 checksum to the GitHub release. The workflow fails if the tag does not match `jp2subs.__version__`.
+
+The app icon is generated from the logo the UI draws:
+
+```bash
+python assets/generate_icon.py
+```
+
+## Repository layout
+
+- `src/jp2subs/` — CLI, pipeline, ASR, subtitles, FFmpeg helpers
+- `src/jp2subs/runtime/` — the self-install layer: catalog, downloader, component manager, updater
+- `src/jp2subs/gui/` — theme, shared widgets, and one module per page under `pages/`
+- `installer/` — Inno Setup script
+- `assets/` — app icon and its generator
+- `tests/` — test suite
 
 ## Master JSON format
+
 See [`examples/master.sample.json`](examples/master.sample.json).
 
-Example:
 ```json
 {
-  "meta": {
-    "source": "...",
-    "created_at": "...",
-    "tool_versions": {},
-    "settings": {}
-  },
+  "meta": { "source": "...", "created_at": "...", "tool_versions": {}, "settings": {} },
   "segments": [
-    {
-      "id": 1,
-      "start": 12.34,
-      "end": 15.82,
-      "ja_raw": "...",
-      "romaji": "..."
-    }
+    { "id": 1, "start": 12.34, "end": 15.82, "ja_raw": "...", "romaji": "..." }
   ]
 }
 ```
 
-## Repository structure
-- `src/jp2subs/`: CLI, GUI, ASR helpers, romanization, exporters, ffmpeg helpers
-- `examples/`: sample `master.json`
-- `tests/`: automated tests
-- `build_executable.py`: PyInstaller helper for the Windows GUI build
-- `.github/workflows/`: CI/build automation
+## Tests
 
-## Running tests
 ```bash
 pip install -e ".[gui,asr]"
 pip install pytest
 pytest
 ```
 
+The suite runs offline — no test downloads a model or contacts GitHub.
+
 ## License
+
 MIT. See [LICENSE](LICENSE).
+
+Whisper models are the [Systran](https://huggingface.co/Systran) and [Mobius Labs](https://huggingface.co/mobiuslabsgmbh) CTranslate2 conversions. FFmpeg builds come from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds).

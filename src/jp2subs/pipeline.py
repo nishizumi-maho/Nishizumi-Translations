@@ -94,7 +94,7 @@ class PipelineRunner:
             vad_filter=job.vad,
             temperature=0.0,
             beam_size=job.beam_size,
-            device="auto",
+            device=getattr(job, "device", None) or "auto",
             best_of=job.best_of,
             patience=job.patience,
             length_penalty=job.length_penalty,

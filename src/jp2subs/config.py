@@ -44,8 +44,21 @@ class TranslationConfig:
 
 
 @dataclass
+class AppSettings:
+    """Preferences for the desktop app itself rather than the pipeline."""
+
+    theme: str = "dark"
+    check_updates_on_start: bool = True
+    include_prereleases: bool = False
+    setup_completed: bool = False
+    open_output_when_done: bool = False
+    prefer_gpu: bool = True
+    last_update_check: str | None = None
+
+
+@dataclass
 class DefaultsConfig:
-    model_size: str = "large-v3"
+    model_size: str = "large-v3-turbo"
     beam_size: int = 5
     vad: bool = True
     mono: bool = False
@@ -66,15 +79,18 @@ class AppConfig:
     ffmpeg_path: str | None = None
     translation: TranslationConfig = field(default_factory=TranslationConfig)
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
+    app: AppSettings = field(default_factory=AppSettings)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
         translation = _filter_dataclass_fields(TranslationConfig, data.get("translation", {}))
         defaults = _filter_dataclass_fields(DefaultsConfig, data.get("defaults", {}))
+        app = _filter_dataclass_fields(AppSettings, data.get("app", {}))
         return cls(
             ffmpeg_path=data.get("ffmpeg_path"),
             translation=TranslationConfig(**translation),
             defaults=DefaultsConfig(**defaults),
+            app=AppSettings(**app),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,14 +98,40 @@ class AppConfig:
             "ffmpeg_path": self.ffmpeg_path,
             "translation": asdict(self.translation),
             "defaults": asdict(self.defaults),
+            "app": asdict(self.app),
         }
 
 
+def _managed_ffmpeg() -> str | None:
+    """ffmpeg installed by the app's own downloader, if any."""
+
+    try:
+        from .runtime.manager import manager
+    except Exception:  # pragma: no cover - runtime package always ships with the app
+        return None
+    return manager.ffmpeg_binary()
+
+
+def _managed_ffprobe() -> str | None:
+    try:
+        from .runtime.manager import manager
+    except Exception:  # pragma: no cover - runtime package always ships with the app
+        return None
+    return manager.ffprobe_binary()
+
+
 def detect_ffmpeg(configured_path: str | None = None) -> str | None:
-    """Return the ffmpeg binary path if available."""
+    """Return the ffmpeg binary path if available.
+
+    Preference order: an explicitly configured path, then the copy the app
+    downloaded for the user, then whatever is on ``PATH``.
+    """
 
     if configured_path:
         return configured_path
+    managed = _managed_ffmpeg()
+    if managed:
+        return managed
     return shutil.which("ffmpeg")
 
 
@@ -102,6 +144,9 @@ def detect_ffprobe(configured_ffmpeg_path: str | None = None) -> str | None:
         sibling = ffmpeg_path.with_name(candidate_name)
         if sibling.exists():
             return str(sibling)
+    managed = _managed_ffprobe()
+    if managed:
+        return managed
     return shutil.which("ffprobe")
 
 
@@ -113,8 +158,6 @@ def resolve_media_tool(binary: str) -> str:
         return binary
 
     cfg = load_config()
-    if not cfg.ffmpeg_path:
-        return binary
     if name in {"ffmpeg", "ffmpeg.exe"}:
         return detect_ffmpeg(cfg.ffmpeg_path) or binary
     return detect_ffprobe(cfg.ffmpeg_path) or binary
@@ -166,41 +209,39 @@ def _to_toml(data: Dict[str, Any]) -> str:
     """Minimal TOML serializer to avoid extra dependencies."""
 
     lines: list[str] = []
-    ffmpeg_path = data.get("ffmpeg_path")
-    if ffmpeg_path:
-        lines.append(f"ffmpeg_path = \"{_escape_basic_string(ffmpeg_path)}\"")
+    tables: list[tuple[str, Dict[str, Any]]] = []
 
-    translation = data.get("translation", {})
-    defaults = data.get("defaults", {})
-
-    lines.append("[translation]")
-    for key, value in translation.items():
-        if isinstance(value, list):
-            serialized = ", ".join(f"\"{_escape_basic_string(item)}\"" for item in value)
-            lines.append(f"{key} = [{serialized}]")
+    for key, value in data.items():
+        if isinstance(value, dict):
+            tables.append((key, value))
         elif value is not None:
-            lines.append(f"{key} = \"{_escape_basic_string(value)}\"")
+            lines.append(f"{key} = {_to_toml_value(value)}")
 
-    lines.append("\n[defaults]")
-    for key, value in defaults.items():
-        if value is None:
-            continue
-        if isinstance(value, bool):
-            literal = "true" if value else "false"
-            lines.append(f"{key} = {literal}")
-        elif isinstance(value, int):
-            lines.append(f"{key} = {value}")
-        elif isinstance(value, float):
-            lines.append(f"{key} = {value}")
-        elif isinstance(value, dict):
-            inner = ", ".join(
-                f"{inner_key} = \"{_escape_basic_string(str(inner_val))}\"" for inner_key, inner_val in value.items()
-            )
-            lines.append(f"{key} = {{{inner}}}")
-        else:
-            lines.append(f"{key} = \"{_escape_basic_string(value)}\"")
+    for name, table in tables:
+        if lines:
+            lines.append("")
+        lines.append(f"[{name}]")
+        for key, value in table.items():
+            if value is None:
+                continue
+            lines.append(f"{key} = {_to_toml_value(value)}")
 
     return "\n".join(lines) + "\n"
+
+
+def _to_toml_value(value: Any) -> str:
+    """Render a single TOML value. Booleans must be checked before ints."""
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_to_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        inner = ", ".join(f"{key} = {_to_toml_value(item)}" for key, item in value.items())
+        return "{" + inner + "}"
+    return f"\"{_escape_basic_string(str(value))}\""
 
 
 def _escape_basic_string(value: str) -> str:
