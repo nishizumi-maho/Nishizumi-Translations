@@ -1,234 +1,550 @@
-"""Modern UI theme for jp2subs GUI."""
+"""Design tokens and the global stylesheet for the desktop app.
+
+Two palettes share one stylesheet template, so adding a colour means adding it
+to both :data:`DARK` and :data:`LIGHT` and nothing else.
+"""
 from __future__ import annotations
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from dataclasses import dataclass
+
+from PySide6 import QtGui, QtWidgets
 
 
-PRIMARY_COLOR = "#4f46e5"  # Indigo accent
-PRIMARY_COLOR_DARK = "#3730a3"
-SURFACE_DARK = "#020617"
-SURFACE_MEDIUM = "#0b1120"
-SURFACE_LIGHT = "#111827"
-BORDER_COLOR = "#1f2937"
-TEXT_PRIMARY = "#e5e7eb"
-TEXT_SECONDARY = "#9ca3af"
-ERROR_COLOR = "#f97373"
-SUCCESS_COLOR = "#22c55e"
+@dataclass(frozen=True)
+class Palette:
+    """Every colour the stylesheet is allowed to reference."""
+
+    name: str
+    canvas: str          # window background
+    surface: str         # cards
+    surface_alt: str     # inputs, nested panels
+    surface_hover: str
+    sidebar: str
+    border: str
+    border_strong: str
+    text: str
+    text_muted: str
+    text_faint: str
+    accent: str
+    accent_hover: str
+    accent_pressed: str
+    accent_text: str
+    accent_soft: str     # tinted background for selected nav / chips
+    success: str
+    success_soft: str
+    warning: str
+    warning_soft: str
+    danger: str
+    danger_soft: str
+    shadow: str
 
 
-def _build_palette() -> QtGui.QPalette:
-    """Create a dark palette tuned for the app."""
+DARK = Palette(
+    name="dark",
+    canvas="#0b0f19",
+    surface="#141a29",
+    surface_alt="#0f1421",
+    surface_hover="#1c2436",
+    sidebar="#0e1320",
+    border="#232c40",
+    border_strong="#33405c",
+    text="#e8ecf5",
+    text_muted="#98a3bb",
+    text_faint="#6b7794",
+    accent="#6366f1",
+    accent_hover="#7c7ef5",
+    accent_pressed="#4f46e5",
+    accent_text="#ffffff",
+    accent_soft="#232a4d",
+    success="#34d399",
+    success_soft="#12312a",
+    warning="#fbbf24",
+    warning_soft="#332708",
+    danger="#f87171",
+    danger_soft="#3a1a1d",
+    shadow="rgba(0, 0, 0, 0.45)",
+)
+
+LIGHT = Palette(
+    name="light",
+    canvas="#f4f6fb",
+    surface="#ffffff",
+    surface_alt="#f7f9fd",
+    surface_hover="#eef1f8",
+    sidebar="#ffffff",
+    border="#e1e6f0",
+    border_strong="#c8d0e0",
+    text="#141a29",
+    text_muted="#5b6780",
+    text_faint="#8a94aa",
+    accent="#4f46e5",
+    accent_hover="#4338ca",
+    accent_pressed="#3730a3",
+    accent_text="#ffffff",
+    accent_soft="#ecebfd",
+    success="#059669",
+    success_soft="#e5f6f0",
+    warning="#b45309",
+    warning_soft="#fdf3e2",
+    danger="#dc2626",
+    danger_soft="#fdeaea",
+    shadow="rgba(15, 23, 42, 0.12)",
+)
+
+PALETTES = {"dark": DARK, "light": LIGHT}
+
+#: Current palette, so widgets that paint themselves can match the stylesheet.
+_active: Palette = DARK
+
+
+def active_palette() -> Palette:
+    return _active
+
+
+def palette_for(name: str) -> Palette:
+    return PALETTES.get((name or "dark").lower(), DARK)
+
+
+def _qt_palette(colors: Palette) -> QtGui.QPalette:
     palette = QtGui.QPalette()
+    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(colors.canvas))
+    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(colors.text))
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(colors.surface_alt))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(colors.surface))
+    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(colors.surface))
+    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(colors.text))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(colors.text))
+    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(colors.surface))
+    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(colors.text))
+    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(colors.danger))
+    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(colors.accent))
+    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(colors.accent_text))
+    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(colors.accent))
+    palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(colors.text_faint))
 
-    # Window / base colors
-    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(SURFACE_DARK))
-    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(TEXT_PRIMARY))
-    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(SURFACE_MEDIUM))
-    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(SURFACE_LIGHT))
-    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(SURFACE_LIGHT))
-    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(TEXT_PRIMARY))
-
-    # Text
-    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(TEXT_PRIMARY))
-    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(SURFACE_LIGHT))
-    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(TEXT_PRIMARY))
-    palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
-
-    # Highlights
-    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(PRIMARY_COLOR))
-    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor("#ffffff"))
-
-    # Links
-    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(PRIMARY_COLOR))
-    palette.setColor(QtGui.QPalette.LinkVisited, QtGui.QColor(PRIMARY_COLOR_DARK))
-
-    # Disabled state
-    disabled = QtGui.QColor(TEXT_SECONDARY)
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, disabled)
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, disabled)
-    palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText, disabled)
-
+    disabled = QtGui.QColor(colors.text_faint)
+    for role in (QtGui.QPalette.Text, QtGui.QPalette.ButtonText, QtGui.QPalette.WindowText):
+        palette.setColor(QtGui.QPalette.Disabled, role, disabled)
     return palette
 
 
-EXTRA_STYLESHEET = """
-QListWidget#SourceList {
-    min-height: 140px;
-}
-
-QListWidget#ResultsList {
-    min-height: 80px;
-}
-
-QTextEdit#LogView {
-    min-height: 130px;
-    font-family: "JetBrains Mono", "Fira Code", monospace;
-    font-size: 11px;
-}
-"""
-
-GLOBAL_STYLESHEET = f"""
-QMainWindow {{
-    background-color: {SURFACE_DARK};
+def build_stylesheet(c: Palette) -> str:
+    return f"""
+QWidget {{
+    color: {c.text};
+    font-size: 13px;
 }}
 
-QWidget#AppShell {{
+QWidget#Canvas, QMainWindow {{
+    background-color: {c.canvas};
+}}
+
+/* ---------- sidebar ---------- */
+
+QFrame#Sidebar {{
+    background-color: {c.sidebar};
+    border-right: 1px solid {c.border};
+}}
+
+QLabel#BrandName {{
+    font-size: 15px;
+    font-weight: 700;
+    color: {c.text};
+}}
+
+QLabel#BrandVersion {{
+    font-size: 11px;
+    color: {c.text_faint};
+}}
+
+QPushButton#NavItem {{
     background-color: transparent;
+    border: none;
+    border-radius: 9px;
+    padding: 9px 12px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 500;
+    color: {c.text_muted};
+}}
+
+QPushButton#NavItem:hover {{
+    background-color: {c.surface_hover};
+    color: {c.text};
+}}
+
+QPushButton#NavItem:checked {{
+    background-color: {c.accent_soft};
+    color: {c.accent};
+    font-weight: 600;
+}}
+
+/* ---------- page chrome ---------- */
+
+QLabel#PageTitle {{
+    font-size: 22px;
+    font-weight: 700;
+    color: {c.text};
+}}
+
+QLabel#PageSubtitle {{
+    font-size: 13px;
+    color: {c.text_muted};
+}}
+
+QLabel#CardTitle {{
+    font-size: 14px;
+    font-weight: 600;
+    color: {c.text};
+}}
+
+QLabel#CardHint, QLabel#Hint {{
+    font-size: 12px;
+    color: {c.text_muted};
+}}
+
+QLabel#Muted {{
+    color: {c.text_muted};
+}}
+
+QLabel#Faint {{
+    color: {c.text_faint};
+    font-size: 12px;
 }}
 
 QFrame#Card {{
-    background-color: {SURFACE_MEDIUM};
+    background-color: {c.surface};
+    border: 1px solid {c.border};
     border-radius: 14px;
-    border: 1px solid {BORDER_COLOR};
 }}
 
-QLabel#TitleLabel {{
-    font-size: 22px;
-    font-weight: 600;
-    color: {TEXT_PRIMARY};
-}}
-
-QLabel#SubtitleLabel {{
-    font-size: 12px;
-    color: {TEXT_SECONDARY};
-}}
-
-QTabWidget::pane {{
-    border: none;
-    border-radius: 12px;
-    background-color: {SURFACE_MEDIUM};
-    margin-top: 4px;
-}}
-
-QTabBar {{
-    border: none;
-}}
-
-QTabBar::tab {{
-    background-color: transparent;
-    color: {TEXT_SECONDARY};
-    padding: 6px 14px;
+QFrame#Inset {{
+    background-color: {c.surface_alt};
+    border: 1px solid {c.border};
     border-radius: 10px;
-    margin-right: 4px;
-    font-weight: 500;
+}}
+
+QFrame#Divider {{
+    background-color: {c.border};
+    max-height: 1px;
     border: none;
 }}
 
-QTabBar::tab:selected {{
-    background-color: {PRIMARY_COLOR};
-    color: #ffffff;
-}}
-
-QTabBar::tab:hover:!selected {{
-    background-color: {SURFACE_LIGHT};
-    color: {TEXT_PRIMARY};
-}}
+/* ---------- buttons ---------- */
 
 QPushButton {{
-    background-color: {SURFACE_LIGHT};
-    color: {TEXT_PRIMARY};
-    border-radius: 8px;
-    border: 1px solid {BORDER_COLOR};
-    padding: 6px 12px;
+    background-color: {c.surface_alt};
+    color: {c.text};
+    border: 1px solid {c.border_strong};
+    border-radius: 9px;
+    padding: 7px 14px;
+    font-weight: 500;
 }}
 
 QPushButton:hover {{
-    background-color: {PRIMARY_COLOR_DARK};
-    border-color: {PRIMARY_COLOR};
+    background-color: {c.surface_hover};
+    border-color: {c.accent};
 }}
 
 QPushButton:pressed {{
-    background-color: {PRIMARY_COLOR};
+    background-color: {c.accent_soft};
 }}
 
 QPushButton:disabled {{
-    background-color: {SURFACE_MEDIUM};
-    color: {TEXT_SECONDARY};
-    border-color: {BORDER_COLOR};
+    color: {c.text_faint};
+    border-color: {c.border};
+    background-color: {c.surface_alt};
 }}
 
-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background-color: {SURFACE_DARK};
-    color: {TEXT_PRIMARY};
-    border-radius: 8px;
-    border: 1px solid {BORDER_COLOR};
+QPushButton#Primary {{
+    background-color: {c.accent};
+    color: {c.accent_text};
+    border: 1px solid {c.accent};
+    font-weight: 600;
+    padding: 9px 22px;
+}}
+
+QPushButton#Primary:hover {{
+    background-color: {c.accent_hover};
+    border-color: {c.accent_hover};
+}}
+
+QPushButton#Primary:pressed {{
+    background-color: {c.accent_pressed};
+}}
+
+QPushButton#Primary:disabled {{
+    background-color: {c.surface_hover};
+    border-color: {c.border};
+    color: {c.text_faint};
+}}
+
+QPushButton#Danger {{
+    color: {c.danger};
+    border-color: {c.border_strong};
+}}
+
+QPushButton#Danger:hover {{
+    background-color: {c.danger_soft};
+    border-color: {c.danger};
+}}
+
+QPushButton#Ghost {{
+    background-color: transparent;
+    border: none;
+    color: {c.accent};
     padding: 4px 8px;
-    selection-background-color: {PRIMARY_COLOR};
+    font-weight: 600;
 }}
 
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+QPushButton#Ghost:hover {{
+    color: {c.accent_hover};
+    background-color: {c.accent_soft};
+}}
+
+QPushButton#Link {{
+    background: transparent;
+    border: none;
+    color: {c.accent};
+    padding: 0;
+    text-align: left;
+    font-weight: 500;
+}}
+
+QToolButton#Disclosure {{
+    background: transparent;
+    border: none;
+    color: {c.text_muted};
+    font-weight: 600;
+    padding: 2px;
+}}
+
+QToolButton#Disclosure:hover {{
+    color: {c.text};
+}}
+
+/* ---------- inputs ---------- */
+
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
+    background-color: {c.surface_alt};
+    color: {c.text};
+    border: 1px solid {c.border_strong};
+    border-radius: 9px;
+    padding: 6px 10px;
+    selection-background-color: {c.accent};
+    selection-color: {c.accent_text};
+}}
+
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
 QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-    border-color: {PRIMARY_COLOR};
+    border-color: {c.accent};
 }}
 
-QListWidget, QTreeWidget, QTableWidget {{
-    background-color: {SURFACE_DARK};
-    border-radius: 10px;
-    border: 1px solid {BORDER_COLOR};
-    padding: 4px;
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {{
+    color: {c.text_faint};
 }}
+
+/* The drop-down and spin-box arrows are left to the Fusion style. Overriding
+   those subcontrols in a stylesheet suppresses the native arrow, and Qt does
+   not honour the CSS border-triangle trick used on the web. */
+
+QComboBox QAbstractItemView {{
+    background-color: {c.surface};
+    border: 1px solid {c.border_strong};
+    border-radius: 8px;
+    padding: 4px;
+    selection-background-color: {c.accent_soft};
+    selection-color: {c.text};
+    outline: none;
+}}
+
+QCheckBox {{
+    spacing: 8px;
+    color: {c.text};
+}}
+
+QCheckBox::indicator {{
+    width: 17px;
+    height: 17px;
+    border-radius: 5px;
+    border: 1px solid {c.border_strong};
+    background-color: {c.surface_alt};
+}}
+
+QCheckBox::indicator:hover {{
+    border-color: {c.accent};
+}}
+
+QCheckBox::indicator:checked {{
+    background-color: {c.accent};
+    border-color: {c.accent};
+    image: none;
+}}
+
+/* ---------- lists ---------- */
+
+QListWidget, QTreeWidget {{
+    background-color: {c.surface_alt};
+    border: 1px solid {c.border};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+}}
+
+QListWidget::item {{
+    padding: 7px 8px;
+    border-radius: 7px;
+    color: {c.text};
+}}
+
+QListWidget::item:selected {{
+    background-color: {c.accent_soft};
+    color: {c.text};
+}}
+
+QListWidget::item:hover {{
+    background-color: {c.surface_hover};
+}}
+
+QListWidget#DropList {{
+    min-height: 132px;
+}}
+
+QTextEdit#LogView {{
+    background-color: {c.surface_alt};
+    font-family: "Cascadia Mono", "JetBrains Mono", "Consolas", monospace;
+    font-size: 11px;
+    color: {c.text_muted};
+    min-height: 150px;
+}}
+
+/* ---------- progress ---------- */
 
 QProgressBar {{
-    border: 1px solid {BORDER_COLOR};
-    border-radius: 10px;
+    background-color: {c.surface_alt};
+    border: none;
+    border-radius: 6px;
+    height: 8px;
     text-align: center;
-    background-color: {SURFACE_DARK};
-    color: {TEXT_SECONDARY};
+    color: transparent;
 }}
 
 QProgressBar::chunk {{
-    background-color: {PRIMARY_COLOR};
-    border-radius: 8px;
+    background-color: {c.accent};
+    border-radius: 6px;
 }}
 
-QStatusBar {{
-    background-color: {SURFACE_LIGHT};
-    border-top: 1px solid {BORDER_COLOR};
+QProgressBar#Slim {{
+    height: 6px;
 }}
 
-QGroupBox {{
-    border: 1px solid {BORDER_COLOR};
-    border-radius: 10px;
-    margin-top: 8px;
-    background-color: {SURFACE_MEDIUM};
+/* ---------- misc ---------- */
+
+QScrollArea {{
+    background: transparent;
+    border: none;
 }}
 
-QGroupBox::title {{
-    subcontrol-origin: margin;
-    left: 10px;
-    padding: 0 4px;
-    color: {TEXT_SECONDARY};
-    font-weight: 500;
+QScrollArea > QWidget > QWidget {{
+    background: transparent;
 }}
 
 QScrollBar:vertical {{
     background: transparent;
     width: 10px;
-    margin: 4px 0 4px 0;
+    margin: 2px;
 }}
 
 QScrollBar::handle:vertical {{
-    background: {SURFACE_LIGHT};
+    background: {c.border_strong};
     border-radius: 5px;
+    min-height: 30px;
 }}
 
 QScrollBar::handle:vertical:hover {{
-    background: {PRIMARY_COLOR_DARK};
+    background: {c.text_faint};
 }}
 
-QCheckBox, QLabel {{
-    color: {TEXT_PRIMARY};
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
+    height: 0;
 }}
 
-{EXTRA_STYLESHEET}
+QScrollBar:horizontal {{
+    background: transparent;
+    height: 10px;
+    margin: 2px;
+}}
+
+QScrollBar::handle:horizontal {{
+    background: {c.border_strong};
+    border-radius: 5px;
+    min-width: 30px;
+}}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
+    width: 0;
+}}
+
+QToolTip {{
+    background-color: {c.surface};
+    color: {c.text};
+    border: 1px solid {c.border_strong};
+    border-radius: 6px;
+    padding: 5px 8px;
+}}
+
+QStatusBar {{
+    background-color: {c.sidebar};
+    border-top: 1px solid {c.border};
+    color: {c.text_muted};
+}}
+
+QStatusBar::item {{
+    border: none;
+}}
+
+QMessageBox, QDialog {{
+    background-color: {c.canvas};
+}}
+
+QGroupBox {{
+    border: 1px solid {c.border};
+    border-radius: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
+    color: {c.text_muted};
+}}
+
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 5px;
+    font-weight: 600;
+}}
 """
 
 
-def apply_app_theme(app: QtWidgets.QApplication) -> None:
-    """Apply palette and global stylesheet to the QApplication."""
+def apply_app_theme(app: QtWidgets.QApplication, theme: str = "dark") -> Palette:
+    """Apply a palette to the whole application and return it."""
+
+    global _active
+    colors = palette_for(theme)
+    _active = colors
+
     app.setStyle("Fusion")
-    app.setPalette(_build_palette())
-    base_font = app.font()
-    base_font.setPointSize(10)
-    app.setFont(base_font)
-    app.setStyleSheet(GLOBAL_STYLESHEET)
+    app.setPalette(_qt_palette(colors))
+
+    font = app.font()
+    for family in ("Segoe UI Variable Text", "Segoe UI", "Inter", "Noto Sans"):
+        if family in QtGui.QFontDatabase.families():
+            font.setFamily(family)
+            break
+    font.setPointSize(10)
+    app.setFont(font)
+
+    app.setStyleSheet(build_stylesheet(colors))
+    return colors

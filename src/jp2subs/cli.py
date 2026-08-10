@@ -13,9 +13,14 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn
 from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.table import Table
 
 from . import config, deps
 from .paths import coerce_workdir, default_workdir_for_input, normalize_input_path, strip_quotes
+from .runtime import catalog as runtime_catalog
+from .runtime import store as runtime_store
+from .runtime import updater
+from .runtime.manager import manager as component_manager
 
 from . import __version__
 from . import audio, asr, io, romanizer, subtitles, video
@@ -25,13 +30,26 @@ BATCH_STAGES: Sequence[str] = ("ingest", "transcribe", "romanize", "export")
 
 app = typer.Typer(add_completion=False, help="jp2subs: end-to-end JP transcription and subtitling")
 deps_app = typer.Typer(add_completion=False, help="Manage optional jp2subs dependencies")
+components_app = typer.Typer(add_completion=False, help="Download and manage models, ffmpeg and GPU libraries")
 
 app.add_typer(deps_app, name="deps")
+app.add_typer(components_app, name="components")
 console = Console()
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"jp2subs {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
-def main(ctx: typer.Context):
+def main(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", "-V", callback=_version_callback, is_eager=True, help="Show the version and exit."
+    ),
+):
     """jp2subs CLI entrypoint."""
     ctx.obj = {}
 
@@ -56,6 +74,201 @@ def doctor():
 
     code = deps.doctor(console)
     raise typer.Exit(code=code)
+
+
+def _resolve_component_key(name: str) -> str:
+    """Accept 'ffmpeg', 'cuda', 'large-v3' or a full 'model:large-v3' key."""
+
+    raw = (name or "").strip().lower()
+    if not raw:
+        raise typer.BadParameter("Component name is required.")
+    if runtime_catalog.component(raw):
+        return raw
+
+    aliases = {
+        "ffmpeg": "tool:ffmpeg",
+        "cuda": "accel:cuda",
+        "gpu": "accel:cuda",
+    }
+    if raw in aliases and runtime_catalog.component(aliases[raw]):
+        return aliases[raw]
+
+    model = runtime_catalog.model_for_alias(raw)
+    if model:
+        return model.key
+
+    known = ", ".join(item.key for item in runtime_catalog.all_components())
+    raise typer.BadParameter(f"Unknown component '{name}'. Available: {known}")
+
+
+def _install_with_progress(key: str) -> None:
+    """Install one component while drawing a rich progress bar."""
+
+    item = runtime_catalog.component(key)
+    label = item.name if item else key
+
+    with Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.fields[detail]}"),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task(label, total=100, detail="")
+
+        def on_progress(event) -> None:
+            if event.percent < 0:
+                progress.update(task_id, total=None, detail=event.detail)
+            else:
+                progress.update(task_id, total=100, completed=event.percent, detail=event.detail)
+
+        component_manager.install(key, on_progress=on_progress)
+
+    console.print(f"[green]Installed[/green] {label}")
+
+
+@components_app.command("list")
+def components_list():
+    """Show every downloadable component and whether it is installed."""
+
+    table = Table(title=f"Components in {runtime_store.data_dir()}")
+    table.add_column("Key")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Size")
+    table.add_column("Notes")
+
+    for status in component_manager.statuses():
+        item = status.component
+        if status.installed:
+            state = "[green]installed[/green]"
+            size = runtime_store.human_size(status.size)
+        else:
+            state = "[dim]not installed[/dim]"
+            size = f"~{runtime_store.human_size(item.approx_size)}"
+        tags = []
+        if item.required:
+            tags.append("required")
+        if item.recommended:
+            tags.append("recommended")
+        table.add_row(item.key, item.name, state, size, ", ".join(tags))
+
+    console.print(table)
+    total = component_manager.total_size()
+    console.print(f"Using {runtime_store.human_size(total)} on disk." if total else "Nothing downloaded yet.")
+
+
+@components_app.command("install")
+def components_install(name: str = typer.Argument(..., help="ffmpeg, cuda, a model name, or a full key")):
+    """Download and install a component."""
+
+    _install_with_progress(_resolve_component_key(name))
+
+
+@components_app.command("remove")
+def components_remove(name: str = typer.Argument(..., help="ffmpeg, cuda, a model name, or a full key")):
+    """Delete an installed component from disk."""
+
+    key = _resolve_component_key(name)
+    component_manager.uninstall(key)
+    console.print(f"[green]Removed[/green] {key}")
+
+
+@components_app.command("path")
+def components_path():
+    """Print the folder where downloaded components live."""
+
+    console.print(str(runtime_store.data_dir()))
+
+
+@app.command(name="setup")
+def setup_cmd(
+    model: str = typer.Option(
+        "", "--model", help="Model to install (default: the recommended one). Use 'none' to skip."
+    ),
+    gpu: bool = typer.Option(False, "--gpu", help="Also install the NVIDIA acceleration libraries."),
+):
+    """Install everything jp2subs needs to run: ffmpeg and a speech model."""
+
+    if not component_manager.is_installed("tool:ffmpeg") and not config.detect_ffmpeg(None):
+        _install_with_progress("tool:ffmpeg")
+    else:
+        console.print("[green]ffmpeg is already available.[/green]")
+
+    if model.strip().lower() == "none":
+        console.print("Skipping the model download.")
+    elif component_manager.installed_models() and not model:
+        installed = ", ".join(item.name for item in component_manager.installed_models())
+        console.print(f"[green]Model already installed:[/green] {installed}")
+    else:
+        key = _resolve_component_key(model) if model else runtime_catalog.recommended_model_key()
+        if component_manager.is_installed(key):
+            console.print(f"[green]{key} is already installed.[/green]")
+        else:
+            _install_with_progress(key)
+
+    if gpu:
+        cuda = runtime_catalog.cuda_component()
+        if not cuda:
+            console.print("[yellow]GPU acceleration is only offered on 64-bit Windows.[/yellow]")
+        elif component_manager.is_installed(cuda.key):
+            console.print("[green]GPU libraries are already installed.[/green]")
+        else:
+            _install_with_progress(cuda.key)
+
+    console.print("\n[bold green]Setup complete.[/bold green] Run [bold]jp2subs ui[/bold] to open the app.")
+
+
+@app.command(name="update")
+def update_cmd(
+    install: bool = typer.Option(False, "--install", help="Download the new release and start the installer."),
+    prerelease: bool = typer.Option(False, "--prerelease", help="Consider pre-releases too."),
+):
+    """Check whether a newer release of jp2subs is available."""
+
+    try:
+        release = updater.check_for_updates(include_prerelease=prerelease)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Could not reach GitHub:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    if not release:
+        console.print(f"[green]jp2subs {__version__} is the latest version.[/green]")
+        return
+
+    console.print(f"[bold]Version {release.version} is available[/bold] (you have {__version__}).")
+    console.print(release.html_url)
+    if release.notes:
+        console.print(f"\n{release.notes.strip()[:1500]}\n")
+
+    if not install:
+        console.print("Run [bold]jp2subs update --install[/bold] to download and install it.")
+        return
+
+    if not release.has_installer:
+        console.print("[yellow]This release has no installer for your platform. Download it from the page above.[/yellow]")
+        raise typer.Exit(code=1)
+
+    with Progress(
+        TextColumn("[bold blue]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("{task.fields[detail]}"),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task(release.asset_name, total=100, detail="")
+
+        def on_progress(event) -> None:
+            if event.percent < 0:
+                progress.update(task_id, total=None, detail=event.detail)
+            else:
+                progress.update(task_id, total=100, completed=event.percent, detail=event.detail)
+
+        path = updater.download_update(release, on_progress=on_progress)
+
+    console.print(f"Downloaded to [bold]{path}[/bold]")
+    updater.launch_installer(path)
+    console.print("The installer has been started. Close jp2subs so it can finish.")
 
 
 @app.command(name="install-llama")

@@ -1,11 +1,20 @@
 """Dataclasses describing GUI state and defaults."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
 
 from ..config import AppConfig, DefaultsConfig, TranslationConfig, load_config, save_config
+
+__all__ = [
+    "AppConfig",
+    "DefaultsConfig",
+    "FinalizeJob",
+    "PipelineJob",
+    "TranslationConfig",
+    "load_app_state",
+    "persist_app_state",
+]
 
 
 @dataclass
@@ -15,9 +24,10 @@ class PipelineJob:
     generate_romaji: bool = False
     fmt: str = "srt"
     beam_size: int = 5
-    model_size: str = "large-v3"
+    model_size: str = "large-v3-turbo"
     vad: bool = True
     mono: bool = False
+    device: str = "auto"
     best_of: int | None = None
     patience: float | None = None
     length_penalty: float | None = None
@@ -33,6 +43,7 @@ class FinalizeJob:
     subtitle: Path | None = None
     mode: str = "sidecar"
     out_dir: Path | None = None
+    container: str = "mkv"
     codec: str = "libx264"
     crf: int = 18
     preset: str = "slow"
