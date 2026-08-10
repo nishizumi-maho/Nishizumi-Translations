@@ -1,7 +1,7 @@
 """Dataclasses describing GUI state and defaults."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import AppConfig, DefaultsConfig, TranslationConfig, load_config, save_config
@@ -35,6 +35,10 @@ class PipelineJob:
     threads: int | None = None
     compute_type: str | None = None
     extra_asr_args: dict | None = None
+    translate: bool = False
+    translate_engine: str = "offline"
+    target_languages: list[str] = field(default_factory=list)
+    bilingual: bool = False
 
 
 @dataclass

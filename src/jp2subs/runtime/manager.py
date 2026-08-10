@@ -95,14 +95,60 @@ class ComponentManager:
             json.dumps(self._manifest(), indent=2, sort_keys=True), encoding="utf-8"
         )
 
-    def _record(self, key: str, path: Path, *, version: str = "") -> None:
-        self._manifest()[key] = {
+    def _record(self, key: str, path: Path, *, version: str = "", component: Component | None = None) -> None:
+        entry = {
             "path": str(path),
             "version": version,
             "size": store.dir_size(path),
             "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
+        if component is not None and component.custom:
+            # Custom models are not in the catalog, so the manifest has to carry
+            # enough to rebuild the component after a restart.
+            entry.update(
+                {
+                    "custom": True,
+                    "repo_id": component.repo_id,
+                    "name": component.name,
+                    "approx_size": component.approx_size,
+                }
+            )
+        self._manifest()[key] = entry
         self._write_manifest()
+
+    # -- custom (searched) models ----------------------------------------
+
+    def custom_components(self) -> list[Component]:
+        """Components rebuilt from manifest entries added via repository search."""
+
+        items: list[Component] = []
+        for key, record in self._manifest().items():
+            if not record.get("custom"):
+                continue
+            repo_id = str(record.get("repo_id") or "")
+            if not repo_id:
+                continue
+            items.append(
+                catalog.custom_model(
+                    repo_id,
+                    approx_size=int(record.get("approx_size") or 0),
+                    name=str(record.get("name") or ""),
+                )
+            )
+            if items[-1].key != key:  # pragma: no cover - manifest written by an older build
+                items[-1] = catalog.custom_model(repo_id)
+        return items
+
+    def _resolve_component(self, key: str) -> Component | None:
+        """Look a key up in the catalog, then among installed custom models."""
+
+        found = catalog.component(key)
+        if found:
+            return found
+        for item in self.custom_components():
+            if item.key == key:
+                return item
+        return None
 
     def _forget(self, key: str) -> None:
         self._manifest().pop(key, None)
@@ -117,7 +163,9 @@ class ComponentManager:
 
     def install_path(self, item: Component) -> Path:
         if item.kind is ComponentKind.MODEL:
-            return store.models_dir() / (item.model_alias or item.key.split(":", 1)[-1])
+            return store.models_dir() / (item.model_alias or catalog.custom_slug(item.repo_id))
+        if item.kind is ComponentKind.TRANSLATION:
+            return store.models_dir() / "translation" / item.key.split(":", 1)[-1]
         if item.key == "tool:ffmpeg":
             return store.tools_dir() / "ffmpeg"
         if item.kind is ComponentKind.ACCELERATION:
@@ -127,11 +175,11 @@ class ComponentManager:
     # -- status -----------------------------------------------------------
 
     def is_installed(self, key: str) -> bool:
-        item = catalog.component(key)
+        item = self._resolve_component(key)
         if not item:
             return False
         path = self.install_path(item)
-        if item.kind is ComponentKind.MODEL:
+        if item.kind in (ComponentKind.MODEL, ComponentKind.TRANSLATION):
             return (path / _MODEL_MARKER).exists() and (path / _MODEL_WEIGHTS).exists()
         if item.key == "tool:ffmpeg":
             return self._managed_ffmpeg() is not None
@@ -140,7 +188,7 @@ class ComponentManager:
         return path.exists()
 
     def status(self, key: str) -> ComponentStatus | None:
-        item = catalog.component(key)
+        item = self._resolve_component(key)
         if not item:
             return None
         installed = self.is_installed(key)
@@ -165,7 +213,11 @@ class ComponentManager:
         return result
 
     def installed_models(self) -> list[Component]:
-        return [item for item in catalog.models() if self.is_installed(item.key)]
+        """Every usable speech model: catalog entries first, then searched ones."""
+
+        installed = [item for item in catalog.models() if self.is_installed(item.key)]
+        installed.extend(item for item in self.custom_components() if self.is_installed(item.key))
+        return installed
 
     def missing_required(self) -> list[Component]:
         """Components without which the app cannot do its job."""
@@ -189,10 +241,24 @@ class ComponentManager:
 
     def model_path(self, alias_or_key: str) -> Path | None:
         item = catalog.model_for_alias(alias_or_key) or catalog.component(alias_or_key)
+        if item is None:
+            item = self._custom_model_for(alias_or_key)
         if not item or not item.is_model:
             return None
         path = self.install_path(item)
         return path if self.is_installed(item.key) else None
+
+    def _custom_model_for(self, name: str) -> Component | None:
+        """Match a searched model by its slug, its repository id, or its key."""
+
+        needle = (name or "").strip()
+        if not needle:
+            return None
+        lowered = needle.lower()
+        for item in self.custom_components():
+            if lowered in {item.model_alias.lower(), item.repo_id.lower(), item.key.lower()}:
+                return item
+        return None
 
     def resolve_model(self, name: str) -> str:
         """Turn a model name into something faster-whisper can load.
@@ -222,6 +288,22 @@ class ComponentManager:
             return installed[0].model_alias
         item = catalog.component(catalog.recommended_model_key())
         return item.model_alias if item else "large-v3-turbo"
+
+    # -- translation ------------------------------------------------------
+
+    def translation_model_path(self, key: str = "") -> Path | None:
+        """Folder of the installed offline translation model, if there is one."""
+
+        candidates = (
+            [catalog.component(key)] if key else list(catalog.translation_models())
+        )
+        for item in candidates:
+            if item and self.is_installed(item.key):
+                return self.install_path(item)
+        return None
+
+    def has_translation_model(self) -> bool:
+        return self.translation_model_path() is not None
 
     # -- ffmpeg -----------------------------------------------------------
 
@@ -276,14 +358,31 @@ class ComponentManager:
 
     # -- install ----------------------------------------------------------
 
+    def install_custom_model(
+        self,
+        repo_id: str,
+        *,
+        approx_size: int = 0,
+        name: str = "",
+        on_progress: ProgressCallback | None = None,
+        is_cancelled: CancelCheck | None = None,
+    ) -> Path:
+        """Install any CTranslate2 Whisper repository found through search."""
+
+        component = catalog.custom_model(repo_id, approx_size=approx_size, name=name)
+        return self.install(
+            component.key, component=component, on_progress=on_progress, is_cancelled=is_cancelled
+        )
+
     def install(
         self,
         key: str,
         *,
+        component: Component | None = None,
         on_progress: ProgressCallback | None = None,
         is_cancelled: CancelCheck | None = None,
     ) -> Path:
-        item = catalog.component(key)
+        item = component or self._resolve_component(key)
         if not item:
             raise ValueError(f"Unknown component: {key}")
 
@@ -294,7 +393,7 @@ class ComponentManager:
         staging.mkdir(parents=True, exist_ok=True)
 
         try:
-            if item.kind is ComponentKind.MODEL:
+            if item.kind in (ComponentKind.MODEL, ComponentKind.TRANSLATION):
                 version = self._install_model(item, staging, on_progress, is_cancelled)
             elif item.key == "tool:ffmpeg":
                 version = self._install_ffmpeg(item, staging, on_progress, is_cancelled)
@@ -310,13 +409,14 @@ class ComponentManager:
             raise
 
         store.remove_path(final)
+        final.parent.mkdir(parents=True, exist_ok=True)
         staging.replace(final)
-        self._record(item.key, final, version=version)
+        self._record(item.key, final, version=version, component=item)
         _emit(on_progress, item.name, 100, f"{item.name} installed")
         return final
 
     def uninstall(self, key: str) -> None:
-        item = catalog.component(key)
+        item = self._resolve_component(key)
         if not item:
             raise ValueError(f"Unknown component: {key}")
         path = self.install_path(item)

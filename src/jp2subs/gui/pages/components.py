@@ -7,7 +7,7 @@ from ...runtime import catalog, store
 from ...runtime.catalog import Component, ComponentKind
 from ...runtime.manager import manager
 from ..common import Banner, Card, IconButton, ScrollPage, StatusChip, hline, label, reveal
-from ..workers import ComponentInstallWorker
+from ..workers import ComponentInstallWorker, ModelSearchWorker
 
 
 class ComponentRow(QtWidgets.QFrame):
@@ -16,10 +16,17 @@ class ComponentRow(QtWidgets.QFrame):
     changed = QtCore.Signal()
     install_started = QtCore.Signal(str)
 
-    def __init__(self, component: Component, parent: QtWidgets.QWidget | None = None):
+    def __init__(
+        self,
+        component: Component,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        removable: bool = True,
+    ):
         super().__init__(parent)
         self.setObjectName("Inset")
         self.component = component
+        self._removable = removable
         self._worker: ComponentInstallWorker | None = None
 
         outer = QtWidgets.QVBoxLayout(self)
@@ -120,7 +127,7 @@ class ComponentRow(QtWidgets.QFrame):
             self.size_label.setText(f"About {store.human_size(self.component.approx_size)} to download")
 
         self.install_btn.setVisible(not installed)
-        self.remove_btn.setVisible(installed)
+        self.remove_btn.setVisible(installed and self._removable)
         self.cancel_btn.setVisible(False)
         self.progress.setVisible(False)
         self.detail_label.setVisible(False)
@@ -149,7 +156,9 @@ class ComponentRow(QtWidgets.QFrame):
             )
             return
 
-        self._worker = ComponentInstallWorker(self.component.key)
+        self._worker = ComponentInstallWorker(
+            self.component.key, component=self.component if self.component.custom else None
+        )
         self._worker.signals.progress.connect(self._on_progress)
         self._worker.signals.detail.connect(self._on_detail)
         self._worker.signals.finished.connect(self._on_finished)
@@ -229,6 +238,13 @@ class ComponentRow(QtWidgets.QFrame):
         )
 
 
+_FAMILY_HINTS = {
+    "General purpose": "Official multilingual Whisper builds. Bigger is more accurate and slower.",
+    "Tuned for Japanese": "Fine-tuned on Japanese speech. Usually beat a general model of the same size.",
+    "Downloaded from Hugging Face": "Models you installed through search.",
+}
+
+
 class ComponentsPage(ScrollPage):
     """Everything the app can fetch on the user's behalf, in one place."""
 
@@ -241,6 +257,9 @@ class ComponentsPage(ScrollPage):
             parent,
         )
         self._rows: list[ComponentRow] = []
+        self._search_rows: list[ComponentRow] = []
+        self._custom_rows: list[ComponentRow] = []
+        self._installed_card: Card | None = None
 
         folder_btn = IconButton("Open folder", "folder")
         folder_btn.clicked.connect(lambda: reveal(store.data_dir()))
@@ -259,12 +278,25 @@ class ComponentsPage(ScrollPage):
             "cpu",
             [item for item in catalog.all_components() if item.kind is ComponentKind.TOOL],
         )
+
+        for family, items in catalog.models_by_family().items():
+            self._add_section(
+                f"Speech models · {family.value}",
+                _FAMILY_HINTS.get(family.value, ""),
+                "waveform",
+                list(items),
+            )
+
+        self._build_search_card()
+        self._build_installed_custom_card()
+
         self._add_section(
-            "Speech models",
-            "Pick one to start. Bigger models are more accurate and slower; you can keep several.",
-            "waveform",
-            list(catalog.models()),
+            "Subtitle translation",
+            "Translate finished subtitles into other languages without sending anything online.",
+            "external",
+            list(catalog.translation_models()),
         )
+
         acceleration = [item for item in catalog.all_components() if item.kind is ComponentKind.ACCELERATION]
         if acceleration:
             self._add_section(
@@ -291,6 +323,144 @@ class ComponentsPage(ScrollPage):
             self._rows.append(row)
         self.content.addWidget(card)
 
+    # -- Hugging Face search ---------------------------------------------
+
+    def _build_search_card(self) -> None:
+        card = Card(
+            "Find another model",
+            "Search Hugging Face for any Whisper model in CTranslate2 format — including ones "
+            "released after this app was built.",
+            icon_name="download",
+        )
+
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(8)
+        self.search_edit = QtWidgets.QLineEdit()
+        self.search_edit.setPlaceholderText("e.g. kotoba-whisper, anime, or paste an owner/model id")
+        self.search_edit.returnPressed.connect(self._run_search)
+        self.search_btn = IconButton("Search", "refresh", primary=True)
+        self.search_btn.clicked.connect(self._run_search)
+        row.addWidget(self.search_edit, 1)
+        row.addWidget(self.search_btn, 0)
+        card.body.addLayout(row)
+
+        suggestions = QtWidgets.QHBoxLayout()
+        suggestions.setSpacing(6)
+        suggestions.addWidget(label("Try:", "Faint"), 0)
+        for term in ("whisper japanese", "kotoba-whisper", "faster-whisper turbo", "whisper anime"):
+            chip = QtWidgets.QPushButton(term)
+            chip.setObjectName("Ghost")
+            chip.setCursor(QtCore.Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _checked=False, value=term: self._search_for(value))
+            suggestions.addWidget(chip, 0)
+        suggestions.addStretch(1)
+        card.body.addLayout(suggestions)
+
+        self.search_status = label("", "Faint")
+        self.search_status.setVisible(False)
+        card.body.addWidget(self.search_status)
+
+        self.search_results_box = QtWidgets.QVBoxLayout()
+        self.search_results_box.setSpacing(10)
+        card.body.addLayout(self.search_results_box)
+
+        self.content.addWidget(card)
+
+    def _build_installed_custom_card(self) -> None:
+        """Holds models installed through search, so they can be removed again."""
+
+        self._installed_card = Card(
+            "Installed from search",
+            "Models you added yourself. They appear in the model picker like any other.",
+            icon_name="check",
+        )
+        self._installed_rows_box = QtWidgets.QVBoxLayout()
+        self._installed_rows_box.setSpacing(10)
+        self._installed_card.body.addLayout(self._installed_rows_box)
+        self._installed_card.setVisible(False)
+        self.content.addWidget(self._installed_card)
+
+    def _refresh_installed_custom(self) -> None:
+        for row in self._custom_rows:
+            if row in self._rows:
+                self._rows.remove(row)
+            row.setParent(None)
+            row.deleteLater()
+        self._custom_rows = []
+
+        # Anything currently on screen in the search results already offers a
+        # Remove button, so listing it twice would just be noise.
+        on_screen = {row.component.key for row in self._search_rows}
+        installed = [
+            item
+            for item in manager.custom_components()
+            if manager.is_installed(item.key) and item.key not in on_screen
+        ]
+        for item in installed:
+            row = ComponentRow(item)
+            row.changed.connect(self._on_row_changed)
+            row.install_started.connect(self._on_install_started)
+            self._installed_rows_box.addWidget(row)
+            self._custom_rows.append(row)
+            self._rows.append(row)
+
+        if self._installed_card:
+            self._installed_card.setVisible(bool(installed))
+
+    def _search_for(self, term: str) -> None:
+        self.search_edit.setText(term)
+        self._run_search()
+
+    def _run_search(self) -> None:
+        query = self.search_edit.text().strip()
+        self._clear_search_results()
+        self.search_status.setVisible(True)
+        self.search_status.setText("Searching Hugging Face...")
+        self.search_btn.setEnabled(False)
+
+        worker = ModelSearchWorker(query or "faster-whisper")
+        worker.signals.results.connect(self._on_search_results)
+        worker.signals.failed.connect(self._on_search_failed)
+        QtCore.QThreadPool.globalInstance().start(worker)
+
+    def _clear_search_results(self) -> None:
+        for row in self._search_rows:
+            if row in self._rows:
+                self._rows.remove(row)
+            row.setParent(None)
+            row.deleteLater()
+        self._search_rows = []
+
+    @QtCore.Slot(list)
+    def _on_search_results(self, results: list) -> None:
+        self.search_btn.setEnabled(True)
+        if not results:
+            self.search_status.setText(
+                "Nothing usable found. CTranslate2 builds usually have 'faster-whisper' or 'ct2' in the name."
+            )
+            return
+
+        self.search_status.setText(f"{len(results)} usable model(s). These install like any other component.")
+        for result in results:
+            component = catalog.custom_model(
+                result.repo_id, approx_size=result.size, name=result.repo_id
+            )
+            row = ComponentRow(component)
+            row.size_label.setText(
+                f"About {store.human_size(result.size)} · {result.downloads:,} downloads"
+                if result.size
+                else f"{result.downloads:,} downloads"
+            )
+            row.changed.connect(self._on_row_changed)
+            row.install_started.connect(self._on_install_started)
+            self.search_results_box.addWidget(row)
+            self._search_rows.append(row)
+            self._rows.append(row)
+
+    def _on_search_failed(self, message: str) -> None:
+        self.search_btn.setEnabled(True)
+        self.search_status.setText(f"Search failed: {message}")
+
     def _on_install_started(self, _key: str) -> None:
         for row in self._rows:
             row.set_busy(True)
@@ -299,11 +469,13 @@ class ComponentsPage(ScrollPage):
         for row in self._rows:
             row.set_busy(False)
         manager.refresh()
+        self._refresh_installed_custom()
         self._update_summary()
         self.components_changed.emit()
 
     def refresh(self) -> None:
         manager.refresh()
+        self._refresh_installed_custom()
         for row in self._rows:
             row.refresh()
         self._update_summary()

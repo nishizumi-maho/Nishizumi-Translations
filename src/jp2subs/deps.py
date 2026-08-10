@@ -216,6 +216,14 @@ def doctor(console: Console) -> int:
     if manager.cuda_bin_dir():
         console.print("[green]GPU acceleration libraries installed.[/green]")
 
+    if manager.has_translation_model():
+        console.print("[green]offline translator installed.[/green]")
+    else:
+        console.print(
+            "[dim]No offline translator. Install it with "
+            "'jp2subs components install translator' if you want translated subtitles.[/dim]"
+        )
+
     try:
         import faster_whisper  # noqa: F401
     except ImportError:
