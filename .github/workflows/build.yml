@@ -33,7 +33,7 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          & "$iscc" "/DMyAppVersion=0.0.0-ci" installer\jp2subs.iss
+          & "$iscc" "/DMyAppVersion=0.0.0" installer\jp2subs.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
       - name: Upload artifact

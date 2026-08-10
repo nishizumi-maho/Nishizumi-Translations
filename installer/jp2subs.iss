@@ -11,6 +11,14 @@
   #define MyAppVersion "0.0.0"
 #endif
 
+; VersionInfoVersion only accepts a numeric version, so strip any pre-release
+; suffix: "2.1.0-rc1" becomes "2.1.0".
+#if Pos("-", MyAppVersion) > 0
+  #define MyNumericVersion Copy(MyAppVersion, 1, Pos("-", MyAppVersion) - 1)
+#else
+  #define MyNumericVersion MyAppVersion
+#endif
+
 #define MyAppName "Nishizumi Translations"
 #define MyAppShortName "jp2subs"
 #define MyAppPublisher "nishizumi-maho"
@@ -23,7 +31,7 @@ AppId={{8F3C2A64-6D51-4E7B-9C0A-2E1B4D7F5A93}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
-VersionInfoVersion={#MyAppVersion}
+VersionInfoVersion={#MyNumericVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
