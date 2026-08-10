@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...runtime.manager import manager
-from .. import icons, theme
+from .. import theme
 from ..common import Banner, Card, Collapsible, IconButton, ScrollPage, hline, label, reveal
 from ..state import FinalizeJob
 from ..workers import FinalizeWorker

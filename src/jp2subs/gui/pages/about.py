@@ -176,7 +176,6 @@ class AboutPage(ScrollPage):
         worker.signals.failed.connect(lambda message: self._on_check_failed(message, silent))
         QtCore.QThreadPool.globalInstance().start(worker)
 
-    @QtCore.Slot(object)
     def _on_checked(self, release: object, silent: bool) -> None:
         self.check_btn.setEnabled(True)
         self._remember_check_time()
