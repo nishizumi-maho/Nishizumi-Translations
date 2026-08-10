@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 
 STAGE_RANGES: Dict[str, Tuple[int, int]] = {
-    "Ingest": (0, 10),
-    "Transcribe": (10, 80),
-    "Romanize": (80, 90),
-    "Export": (90, 100),
+    "Ingest": (0, 8),
+    "Transcribe": (8, 68),
+    "Romanize": (68, 74),
+    "Translate": (74, 92),
+    "Export": (92, 100),
 }
 
 

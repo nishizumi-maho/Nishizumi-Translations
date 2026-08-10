@@ -24,6 +24,7 @@ class SettingsPage(ScrollPage):
 
         self._build_appearance_card()
         self._build_updates_card()
+        self._build_translation_card()
         self._build_tools_card()
         self._build_defaults_card()
         self._build_buttons()
@@ -72,6 +73,50 @@ class SettingsPage(ScrollPage):
         row.addStretch(1)
         card.body.addLayout(row)
 
+        self.content.addWidget(card)
+
+    def _build_translation_card(self) -> None:
+        card = Card(
+            "Translation engines",
+            "The offline engine needs nothing here. Keys are only used for the engine you pick.",
+            icon_name="external",
+        )
+
+        self.translation_status = label("", "CardHint")
+        card.body.addWidget(self.translation_status)
+
+        form = QtWidgets.QFormLayout()
+        form.setSpacing(11)
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+
+        self.deepl_key_edit = QtWidgets.QLineEdit()
+        self.deepl_key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.deepl_key_edit.setPlaceholderText("Paste a DeepL API key (free keys end in :fx)")
+        form.addRow("DeepL key", self.deepl_key_edit)
+
+        self.openai_base_edit = QtWidgets.QLineEdit()
+        self.openai_base_edit.setPlaceholderText("https://api.openai.com/v1")
+        self.openai_base_edit.setToolTip(
+            "Any OpenAI-compatible endpoint works: OpenRouter, LM Studio, Ollama, or your own server."
+        )
+        form.addRow("OpenAI endpoint", self.openai_base_edit)
+
+        self.openai_key_edit = QtWidgets.QLineEdit()
+        self.openai_key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.openai_key_edit.setPlaceholderText("Leave empty for a local server that needs no key")
+        form.addRow("OpenAI key", self.openai_key_edit)
+
+        self.openai_model_edit = QtWidgets.QLineEdit()
+        self.openai_model_edit.setPlaceholderText("gpt-4o-mini")
+        form.addRow("Model name", self.openai_model_edit)
+
+        card.body.addLayout(form)
+        card.body.addWidget(
+            label(
+                "Keys are stored in plain text in your local config.toml, the same as any other setting.",
+                "Faint",
+            )
+        )
         self.content.addWidget(card)
 
     def _build_tools_card(self) -> None:
@@ -262,9 +307,20 @@ class SettingsPage(ScrollPage):
             else f"Nothing downloaded yet. Components will go to {store.data_dir()}"
         )
 
+    def _refresh_translation_status(self) -> None:
+        from ...translation import available_engines
+
+        ready = [engine.name for engine in available_engines(self.cfg) if engine.ready]
+        self.translation_status.setText(
+            "Ready: " + ", ".join(ready)
+            if ready
+            else "No engine is ready yet. Install the offline translator, or add a key below."
+        )
+
     def refresh_components(self) -> None:
         manager.refresh()
         self._refresh_ffmpeg_status()
+        self._refresh_translation_status()
 
     def _sync_from_cfg(self) -> None:
         cfg = self.cfg
@@ -279,6 +335,12 @@ class SettingsPage(ScrollPage):
         self.check_updates_check.setChecked(cfg.app.check_updates_on_start)
         self.prerelease_check.setChecked(cfg.app.include_prereleases)
         self.prefer_gpu_check.setChecked(cfg.app.prefer_gpu)
+
+        self.deepl_key_edit.setText(cfg.translation.deepl_api_key or "")
+        self.openai_base_edit.setText(cfg.translation.openai_base_url or "")
+        self.openai_key_edit.setText(cfg.translation.openai_api_key or "")
+        self.openai_model_edit.setText(cfg.translation.openai_model or "")
+        self._refresh_translation_status()
 
         self.ffmpeg_edit.setText(cfg.ffmpeg_path or "")
         self.beam_spin.setValue(defaults.beam_size)
@@ -313,6 +375,13 @@ class SettingsPage(ScrollPage):
         cfg.app.check_updates_on_start = self.check_updates_check.isChecked()
         cfg.app.include_prereleases = self.prerelease_check.isChecked()
         cfg.app.prefer_gpu = self.prefer_gpu_check.isChecked()
+
+        cfg.translation.deepl_api_key = self.deepl_key_edit.text().strip() or None
+        cfg.translation.openai_base_url = (
+            self.openai_base_edit.text().strip() or "https://api.openai.com/v1"
+        )
+        cfg.translation.openai_api_key = self.openai_key_edit.text().strip() or None
+        cfg.translation.openai_model = self.openai_model_edit.text().strip() or "gpt-4o-mini"
 
         cfg.ffmpeg_path = self.ffmpeg_edit.text().strip() or None
         cfg.defaults.beam_size = self.beam_spin.value()

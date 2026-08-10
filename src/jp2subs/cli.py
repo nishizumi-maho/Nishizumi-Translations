@@ -89,6 +89,9 @@ def _resolve_component_key(name: str) -> str:
         "ffmpeg": "tool:ffmpeg",
         "cuda": "accel:cuda",
         "gpu": "accel:cuda",
+        "translator": runtime_catalog.default_translation_model().key,
+        "translation": runtime_catalog.default_translation_model().key,
+        "nllb": runtime_catalog.default_translation_model().key,
     }
     if raw in aliases and runtime_catalog.component(aliases[raw]):
         return aliases[raw]
@@ -101,30 +104,98 @@ def _resolve_component_key(name: str) -> str:
     raise typer.BadParameter(f"Unknown component '{name}'. Available: {known}")
 
 
-def _install_with_progress(key: str) -> None:
-    """Install one component while drawing a rich progress bar."""
+def _progress_bar(label: str):
+    """Rich progress bar wired to the runtime downloader's callbacks."""
 
-    item = runtime_catalog.component(key)
-    label = item.name if item else key
-
-    with Progress(
+    progress = Progress(
         TextColumn("[bold blue]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
         TextColumn("{task.fields[detail]}"),
         console=console,
-    ) as progress:
-        task_id = progress.add_task(label, total=100, detail="")
+    )
+    task_id = progress.add_task(label, total=100, detail="")
 
-        def on_progress(event) -> None:
-            if event.percent < 0:
-                progress.update(task_id, total=None, detail=event.detail)
-            else:
-                progress.update(task_id, total=100, completed=event.percent, detail=event.detail)
+    def on_progress(event) -> None:
+        if event.percent < 0:
+            progress.update(task_id, total=None, detail=event.detail)
+        else:
+            progress.update(task_id, total=100, completed=event.percent, detail=event.detail)
 
+    return progress, on_progress
+
+
+def _install_with_progress(key: str) -> None:
+    """Install one catalog component while drawing a progress bar."""
+
+    item = runtime_catalog.component(key)
+    label = item.name if item else key
+    progress, on_progress = _progress_bar(label)
+    with progress:
         component_manager.install(key, on_progress=on_progress)
-
     console.print(f"[green]Installed[/green] {label}")
+
+
+def _install_repo_with_progress(repo_id: str) -> None:
+    """Install any CTranslate2 Whisper repository straight from Hugging Face."""
+
+    from .runtime import search as model_search
+
+    found = model_search.inspect_repo(repo_id)
+    if not found:
+        raise typer.BadParameter(f"Could not find '{repo_id}' on Hugging Face.")
+    if not found.is_loadable:
+        raise typer.BadParameter(
+            f"'{found.repo_id}' is not in CTranslate2 format (no model.bin plus config.json). "
+            "Look for a build with 'faster-whisper' or 'ct2' in the name."
+        )
+
+    console.print(f"Installing [bold]{found.repo_id}[/bold] ({runtime_store.human_size(found.size)})")
+    progress, on_progress = _progress_bar(found.repo_id)
+    with progress:
+        component_manager.install_custom_model(
+            found.repo_id, approx_size=found.size, name=found.repo_id, on_progress=on_progress
+        )
+    console.print(f"[green]Installed[/green] {found.repo_id}")
+
+
+@components_app.command("search")
+def components_search(
+    query: str = typer.Argument("faster-whisper", help="Words to search for, or an owner/model id"),
+    limit: int = typer.Option(15, help="How many results to show"),
+):
+    """Search Hugging Face for Whisper models this app can load."""
+
+    from .runtime import search as model_search
+
+    console.print(f"Searching Hugging Face for [bold]{query}[/bold]...")
+    try:
+        results = model_search.search_models(query, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"[red]Search failed:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    if not results:
+        console.print("No CTranslate2 models matched. Try 'faster-whisper' or 'ct2' in the query.")
+        raise typer.Exit(code=1)
+
+    table = Table(title=f"{len(results)} usable model(s)")
+    table.add_column("Repository")
+    table.add_column("Size", justify="right")
+    table.add_column("Downloads", justify="right")
+    table.add_column("Installed")
+
+    for item in results:
+        installed = component_manager.is_installed(f"model:hf:{item.repo_id}")
+        table.add_row(
+            item.repo_id,
+            runtime_store.human_size(item.size),
+            f"{item.downloads:,}",
+            "[green]yes[/green]" if installed else "",
+        )
+
+    console.print(table)
+    console.print("Install one with: [bold]jp2subs components install <repository>[/bold]")
 
 
 @components_app.command("list")
@@ -159,9 +230,16 @@ def components_list():
 
 
 @components_app.command("install")
-def components_install(name: str = typer.Argument(..., help="ffmpeg, cuda, a model name, or a full key")):
+def components_install(
+    name: str = typer.Argument(
+        ..., help="ffmpeg, cuda, translator, a model name, or a Hugging Face owner/model id"
+    )
+):
     """Download and install a component."""
 
+    if "/" in name:
+        _install_repo_with_progress(name)
+        return
     _install_with_progress(_resolve_component_key(name))
 
 
@@ -169,7 +247,7 @@ def components_install(name: str = typer.Argument(..., help="ffmpeg, cuda, a mod
 def components_remove(name: str = typer.Argument(..., help="ffmpeg, cuda, a model name, or a full key")):
     """Delete an installed component from disk."""
 
-    key = _resolve_component_key(name)
+    key = f"model:hf:{name}" if "/" in name else _resolve_component_key(name)
     component_manager.uninstall(key)
     console.print(f"[green]Removed[/green] {key}")
 
@@ -332,13 +410,56 @@ def romanize(master: Path, workdir: Path = typer.Option(Path("workdir"))):
 
 
 @app.command()
-def translate(master: Path):
-    """Legacy translation command (disabled)."""
+def translate(
+    master: Path,
+    to: str = typer.Option("", "--to", help="Comma-separated target languages, e.g. en,pt-BR"),
+    engine: str = typer.Option("offline", help="offline, deepl or openai"),
+    fmt: str = typer.Option("srt", help="Subtitle format to export: srt|vtt|ass"),
+    workdir: Optional[Path] = typer.Option(None, help="Where to write subtitles (defaults to the master's folder)"),
+    bilingual: bool = typer.Option(False, help="Also write a track with Japanese underneath"),
+    list_languages: bool = typer.Option(False, "--list-languages", help="List the language codes and exit"),
+):
+    """Translate an existing master.json and export subtitles."""
 
-    raise typer.BadParameter(
-        "Translation support has been removed from jp2subs. Use a local LLM, DeepL, or a chatbot like ChatGPT "
-        "to translate your transcripts instead."
+    from .translation import LANGUAGES, resolve_many, translate_document
+
+    if list_languages:
+        table = Table(title="Target languages")
+        table.add_column("Code")
+        table.add_column("Language")
+        table.add_column("DeepL")
+        for language in LANGUAGES:
+            table.add_row(language.code, language.name, language.deepl or "—")
+        console.print(table)
+        return
+
+    targets = resolve_many([item.strip() for item in to.split(",") if item.strip()])
+    if not targets:
+        raise typer.BadParameter("No recognised language codes. Run with --list-languages to see them.")
+
+    doc = io.load_master(master)
+    out_dir = Path(workdir) if workdir else Path(master).parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(
+        f"Translating {len(doc.segments)} segment(s) into "
+        f"{', '.join(language.name for language in targets)} using [bold]{engine}[/bold]"
     )
+
+    progress, on_progress = _progress_bar("Translating")
+    with progress:
+        doc = translate_document(doc, targets, engine=engine, on_progress=on_progress)
+
+    io.save_master(doc, master)
+
+    for language in targets:
+        output_path = out_dir / f"subs_{language.code}.{fmt}"
+        subtitles.write_subtitles(doc, output_path, fmt, lang=language.code, secondary=None)
+        console.print(f"Wrote [bold]{output_path}[/bold]")
+        if bilingual:
+            dual_path = out_dir / f"subs_{language.code}_bilingual.{fmt}"
+            subtitles.write_subtitles(doc, dual_path, fmt, lang="ja", secondary=language.code)
+            console.print(f"Wrote [bold]{dual_path}[/bold]")
 
 
 @app.command()
@@ -578,8 +699,8 @@ def _wizard_impl(open_workdir: bool = False):
     romaji_choice = _prompt_choice("Generate romaji?", {"y": "yes", "n": "no"}, "n")
     generate_romaji = romaji_choice == "y"
     console.print(
-        "[yellow]Translation and bilingual exports are no longer built in. Use a local LLM, DeepL, or ChatGPT to translate "
-        "the generated transcripts if needed.[/yellow]"
+        "[dim]Tip: translate the result afterwards with "
+        "'jp2subs translate <workdir>/master.json --to en,pt-BR'.[/dim]"
     )
     fmt_choice = _prompt_choice("Subtitle format", {"1": "srt", "2": "vtt", "3": "ass"}, "1")
     fmt = {"1": "srt", "2": "vtt", "3": "ass"}[fmt_choice]

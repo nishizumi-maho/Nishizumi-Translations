@@ -397,23 +397,34 @@ class StageTimeline(QtWidgets.QWidget):
         self._rows: dict[str, tuple[QtWidgets.QLabel, QtWidgets.QLabel]] = {}
 
         self._states: dict[str, str] = {}
+        self._holders: dict[str, QtWidgets.QWidget] = {}
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(9)
 
         for stage in stages:
-            row = QtWidgets.QHBoxLayout()
+            holder = QtWidgets.QWidget()
+            row = QtWidgets.QHBoxLayout(holder)
+            row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(9)
             marker = QtWidgets.QLabel()
             marker.setFixedSize(18, 18)
             text = QtWidgets.QLabel(stage)
             row.addWidget(marker, 0)
             row.addWidget(text, 1)
-            layout.addLayout(row)
+            layout.addWidget(holder)
             self._rows[stage] = (marker, text)
+            self._holders[stage] = holder
 
         self.reset()
+
+    def set_active_stages(self, stages: Iterable[str]) -> None:
+        """Show only the stages this run will actually go through."""
+
+        wanted = set(stages)
+        for stage, holder in self._holders.items():
+            holder.setVisible(stage in wanted)
 
     def reset(self) -> None:
         for stage in self._rows:

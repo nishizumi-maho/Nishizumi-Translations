@@ -26,7 +26,7 @@ from ..common import (
 from ..state import PipelineJob, load_app_state, persist_app_state
 from ..workers import PipelineWorker
 
-STAGES = ("Ingest", "Transcribe", "Romanize", "Export")
+STAGES = ("Ingest", "Transcribe", "Romanize", "Translate", "Export")
 
 DOWNLOAD_MORE = "__download_more__"
 
@@ -87,6 +87,7 @@ class TranscribePage(ScrollPage):
         self._build_readiness_banner()
         self._build_sources_card()
         self._build_options_card()
+        self._build_translation_card()
         self._build_run_row()
         self._build_progress_card()
         self._build_results_card()
@@ -213,6 +214,100 @@ class TranscribePage(ScrollPage):
         card.body.addWidget(advanced)
 
         self.content.addWidget(card)
+
+    def _build_translation_card(self) -> None:
+        from ...translation import LANGUAGES, available_engines
+
+        card = Card(
+            "Translate the subtitles",
+            "Optional. Produces a subtitle file per language on top of the Japanese one.",
+            icon_name="external",
+        )
+
+        self.translate_check = QtWidgets.QCheckBox("Translate after transcribing")
+        self.translate_check.toggled.connect(self._on_translate_toggled)
+        card.body.addWidget(self.translate_check)
+
+        self.translate_body = QtWidgets.QWidget()
+        body = QtWidgets.QVBoxLayout(self.translate_body)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(11)
+
+        form = QtWidgets.QFormLayout()
+        form.setSpacing(11)
+        form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+
+        self.engine_combo = QtWidgets.QComboBox()
+        for engine in available_engines(self.cfg):
+            suffix = "" if engine.ready else "  — not set up"
+            self.engine_combo.addItem(f"{engine.name}{suffix}", engine.key)
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
+        form.addRow("Engine", self.engine_combo)
+
+        self.engine_hint = label("", "Faint")
+        form.addRow("", self.engine_hint)
+        body.addLayout(form)
+
+        body.addWidget(label("Target languages", "CardHint"))
+
+        self.language_list = QtWidgets.QListWidget()
+        self.language_list.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.language_list.setMaximumHeight(170)
+        for language in LANGUAGES:
+            if language.code == "ja":
+                continue
+            item = QtWidgets.QListWidgetItem(language.name)
+            item.setData(QtCore.Qt.UserRole, language.code)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Unchecked)
+            self.language_list.addItem(item)
+        self.language_list.itemChanged.connect(lambda _item: self._update_language_summary())
+        body.addWidget(self.language_list)
+
+        self.language_summary = label("No languages selected.", "Faint")
+        body.addWidget(self.language_summary)
+
+        self.bilingual_check = QtWidgets.QCheckBox(
+            "Also write a bilingual track (translation above, Japanese below)"
+        )
+        body.addWidget(self.bilingual_check)
+
+        self.translate_body.setVisible(False)
+        card.body.addWidget(self.translate_body)
+        self.content.addWidget(card)
+
+    def _on_translate_toggled(self, checked: bool) -> None:
+        self.translate_body.setVisible(checked)
+        if checked:
+            self._on_engine_changed()
+
+    def _on_engine_changed(self) -> None:
+        from ...translation import available_engines
+
+        chosen = self.engine_combo.currentData()
+        for engine in available_engines(self.cfg):
+            if engine.key != chosen:
+                continue
+            if engine.ready:
+                self.engine_hint.setText(engine.description)
+            else:
+                self.engine_hint.setText(f"{engine.description}  ·  {engine.reason}")
+            return
+
+    def _update_language_summary(self) -> None:
+        chosen = self.selected_languages()
+        if not chosen:
+            self.language_summary.setText("No languages selected.")
+            return
+        self.language_summary.setText(f"{len(chosen)} selected: {', '.join(chosen)}")
+
+    def selected_languages(self) -> list[str]:
+        codes: list[str] = []
+        for index in range(self.language_list.count()):
+            item = self.language_list.item(index)
+            if item.checkState() == QtCore.Qt.Checked:
+                codes.append(str(item.data(QtCore.Qt.UserRole)))
+        return codes
 
     def _build_run_row(self) -> None:
         row = QtWidgets.QHBoxLayout()
@@ -387,12 +482,49 @@ class TranscribePage(ScrollPage):
         if model_index >= 0:
             self.model_combo.setCurrentIndex(model_index)
 
+        translation = self.cfg.translation
+        self.translate_check.setChecked(translation.enabled)
+        self.bilingual_check.setChecked(translation.bilingual)
+        engine_index = self.engine_combo.findData(translation.provider)
+        if engine_index >= 0:
+            self.engine_combo.setCurrentIndex(engine_index)
+        wanted = {code.lower() for code in (translation.target_languages or [])}
+        for index in range(self.language_list.count()):
+            item = self.language_list.item(index)
+            checked = str(item.data(QtCore.Qt.UserRole)).lower() in wanted
+            item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+        self._update_language_summary()
+        self._on_engine_changed()
+
     def remember_model_choice(self) -> None:
+        """Persist the choices worth having again next launch."""
+
         alias = self.model_combo.currentData()
-        if not alias or alias == DOWNLOAD_MORE:
-            return
-        if self.cfg.defaults.model_size != alias:
+        translation = self.cfg.translation
+        dirty = False
+
+        if alias and alias != DOWNLOAD_MORE and self.cfg.defaults.model_size != alias:
             self.cfg.defaults.model_size = alias
+            dirty = True
+
+        engine = self.engine_combo.currentData() or "offline"
+        languages = self.selected_languages()
+        enabled = self.translate_check.isChecked()
+        bilingual = self.bilingual_check.isChecked()
+
+        if (
+            translation.enabled != enabled
+            or translation.provider != engine
+            or translation.bilingual != bilingual
+            or list(translation.target_languages or []) != languages
+        ):
+            translation.enabled = enabled
+            translation.provider = engine
+            translation.bilingual = bilingual
+            translation.target_languages = languages
+            dirty = True
+
+        if dirty:
             persist_app_state(self.cfg)
 
     # -- queue ------------------------------------------------------------
@@ -477,6 +609,11 @@ class TranscribePage(ScrollPage):
         extra_args["suppress_blank"] = defaults.suppress_blank
         extra_args["suppress_tokens"] = defaults.suppress_tokens
         job.extra_asr_args = extra_args
+
+        job.translate = self.translate_check.isChecked()
+        job.translate_engine = self.engine_combo.currentData() or "offline"
+        job.target_languages = self.selected_languages()
+        job.bilingual = self.bilingual_check.isChecked()
         return job
 
     def _resolve_workdir(self, source: Path, base: Path | None, multi: bool) -> Path:
@@ -498,6 +635,8 @@ class TranscribePage(ScrollPage):
             return
 
         self.cfg = load_app_state()
+        if not self._check_translation_ready():
+            return
         self.remember_model_choice()
 
         workdir_text = self.workdir_edit.text().strip()
@@ -515,6 +654,13 @@ class TranscribePage(ScrollPage):
         self.results_list.clear()
         self.results_card.setVisible(False)
         self.progress_card.setVisible(True)
+        active = ["Ingest", "Transcribe"]
+        if self.romaji_check.isChecked():
+            active.append("Romanize")
+        if self.translate_check.isChecked() and self.selected_languages():
+            active.append("Translate")
+        active.append("Export")
+        self.timeline.set_active_stages(active)
         self.timeline.reset()
         self.progress_bar.setValue(0)
         self.stage_label.setText("Preparing...")
@@ -525,6 +671,37 @@ class TranscribePage(ScrollPage):
         if multi and base:
             self._log("Batch mode: each file gets its own subfolder inside the output folder.")
         self._start_next()
+
+    def _check_translation_ready(self) -> bool:
+        """Block the run early rather than failing after transcription finishes."""
+
+        if not self.translate_check.isChecked():
+            return True
+
+        from ...translation import available_engines
+
+        if not self.selected_languages():
+            QtWidgets.QMessageBox.information(
+                self,
+                "Pick a language",
+                "Translation is switched on but no target language is ticked.",
+            )
+            return False
+
+        chosen = self.engine_combo.currentData()
+        for engine in available_engines(self.cfg):
+            if engine.key == chosen and not engine.ready:
+                answer = QtWidgets.QMessageBox.warning(
+                    self,
+                    f"{engine.name} is not ready",
+                    f"{engine.reason}\n\nTranscribe without translating?",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel,
+                    QtWidgets.QMessageBox.Cancel,
+                )
+                if answer != QtWidgets.QMessageBox.Yes:
+                    return False
+                self.translate_check.setChecked(False)
+        return True
 
     def _start_next(self) -> None:
         if not self.pending_jobs:

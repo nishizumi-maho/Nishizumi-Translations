@@ -64,10 +64,15 @@ class PipelineRunner:
                 io_mod.save_master(doc, master_path)
                 outputs.append(self._write_romaji_subtitles(doc, workdir, job.fmt))
 
+            target_languages = self._target_languages(job)
+            if target_languages:
+                doc = self._stage("Translate", lambda: self._translate(doc, target_languages, job))
+                io_mod.save_master(doc, master_path)
+
             outputs.extend(
                 self._stage(
                     "Export",
-                    lambda: self._export(doc, workdir, ["ja"], job.fmt, None),
+                    lambda: self._export(doc, workdir, job, target_languages),
                 )
             )
             if self.callbacks.on_item_done:
@@ -106,33 +111,57 @@ class PipelineRunner:
             is_cancelled=lambda: self._cancelled,
         )
 
-    def _export(self, doc, workdir: Path, languages: Iterable[str], fmt: str, bilingual: str | None) -> List[Path]:
-        subtitles_root: List[Path] = []
-        languages = list(languages)
-        for index, lang in enumerate(languages, start=1):
-            output_path = workdir / f"subs_{lang}.{fmt}"
-            progress_fraction = index / max(1, len(languages))
+    def _target_languages(self, job) -> List[str]:
+        """Requested translation targets, minus the source language."""
+
+        if not getattr(job, "translate", False):
+            return []
+        codes = [str(code) for code in (getattr(job, "target_languages", None) or [])]
+        return [code for code in codes if code and code.lower() != "ja"]
+
+    def _translate(self, doc, languages: List[str], job):
+        from .translation import translate_document
+
+        return translate_document(
+            doc,
+            languages,
+            engine=getattr(job, "translate_engine", "offline") or "offline",
+            on_progress=self._emit_progress,
+            is_cancelled=lambda: self._cancelled,
+        )
+
+    def _export(self, doc, workdir: Path, job, target_languages: Iterable[str]) -> List[Path]:
+        """Write the Japanese track, each translation, and optional bilingual files."""
+
+        fmt = job.fmt
+        bilingual = bool(getattr(job, "bilingual", False))
+        targets = list(target_languages)
+
+        plan: List[tuple[Path, str, str | None]] = [(workdir / f"subs_ja.{fmt}", "ja", None)]
+        for lang in targets:
+            plan.append((workdir / f"subs_{lang}.{fmt}", lang, None))
+            if bilingual:
+                # Translation on top, Japanese underneath.
+                plan.append((workdir / f"subs_{lang}_bilingual.{fmt}", "ja", lang))
+
+        written: List[Path] = []
+        for index, (output_path, lang, secondary) in enumerate(plan, start=1):
             self._emit_progress(
                 ProgressEvent(
                     stage="Export",
-                    percent=self._stage_percent("Export", progress_fraction),
+                    percent=self._stage_percent("Export", index / max(1, len(plan))),
                     message="Exporting subtitles...",
                     detail=f"Writing {output_path.name}",
                 )
             )
-            subtitles.write_subtitles(
-                doc,
-                output_path,
-                fmt,
-                lang=lang,
-                secondary=bilingual,
-            )
-            subtitles_root.append(output_path)
+            subtitles.write_subtitles(doc, output_path, fmt, lang=lang, secondary=secondary)
+            written.append(output_path)
             self._log(f"Exported: {output_path}")
+
         self._emit_progress(
             ProgressEvent(stage="Export", percent=self._stage_percent("Export", 1), message="Export complete")
         )
-        return subtitles_root
+        return written
 
     def _write_romaji_subtitles(self, doc, workdir: Path, fmt: str) -> Path:
         workdir.mkdir(parents=True, exist_ok=True)

@@ -194,11 +194,12 @@ class DownloadSignals(QtCore.QObject if QtCore else object):  # type: ignore[mis
 
 
 class ComponentInstallWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[misc]
-    """Downloads and installs one catalog component."""
+    """Downloads and installs one component, from the catalog or from search."""
 
-    def __init__(self, key: str):
+    def __init__(self, key: str, component=None):
         super().__init__()
         self.key = key
+        self.component = component
         self.signals = DownloadSignals()
         self._cancelled = False
 
@@ -207,7 +208,12 @@ class ComponentInstallWorker(QtCore.QRunnable if QtCore else object):  # type: i
 
     def run(self):  # pragma: no cover - GUI thread
         try:
-            manager.install(self.key, on_progress=self._on_progress, is_cancelled=lambda: self._cancelled)
+            manager.install(
+                self.key,
+                component=self.component,
+                on_progress=self._on_progress,
+                is_cancelled=lambda: self._cancelled,
+            )
         except DownloadCancelled:
             self.signals.cancelled.emit(self.key)
         except Exception as exc:  # noqa: BLE001
@@ -218,6 +224,43 @@ class ComponentInstallWorker(QtCore.QRunnable if QtCore else object):  # type: i
     def _on_progress(self, progress: Progress) -> None:  # pragma: no cover - GUI thread
         self.signals.progress.emit(self.key, progress.percent)
         self.signals.detail.emit(self.key, _format_progress(progress))
+
+
+class SearchSignals(QtCore.QObject if QtCore else object):  # type: ignore[misc]
+    if QtCore:  # pragma: no cover - type guarded
+        #: list[SearchResult]
+        results = QtCore.Signal(list)
+        failed = QtCore.Signal(str)
+
+
+class ModelSearchWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[misc]
+    """Queries Hugging Face for CTranslate2 Whisper repositories."""
+
+    def __init__(self, query: str, limit: int = 20):
+        super().__init__()
+        self.query = query
+        self.limit = limit
+        self.signals = SearchSignals()
+
+    def run(self):  # pragma: no cover - GUI thread
+        from ..runtime import search
+
+        try:
+            direct = search.inspect_repo(self.query) if "/" in self.query else None
+            if direct and direct.is_loadable:
+                results = [direct]
+                extra = [
+                    item
+                    for item in search.search_models(self.query.split("/")[-1], limit=self.limit)
+                    if item.repo_id != direct.repo_id
+                ]
+                results.extend(extra)
+            else:
+                results = search.search_models(self.query, limit=self.limit)
+        except Exception as exc:  # noqa: BLE001
+            self.signals.failed.emit(str(exc))
+            return
+        self.signals.results.emit(results)
 
 
 class UpdateSignals(QtCore.QObject if QtCore else object):  # type: ignore[misc]

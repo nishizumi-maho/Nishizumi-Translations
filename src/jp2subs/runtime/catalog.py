@@ -13,8 +13,17 @@ from enum import Enum
 
 class ComponentKind(str, Enum):
     MODEL = "model"
+    TRANSLATION = "translation"
     TOOL = "tool"
     ACCELERATION = "acceleration"
+
+
+class ModelFamily(str, Enum):
+    """How speech models are grouped on the Components page."""
+
+    GENERAL = "General purpose"
+    JAPANESE = "Tuned for Japanese"
+    CUSTOM = "Downloaded from Hugging Face"
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,7 @@ class Component:
     approx_size: int = 0
     #: Hugging Face repository for CTranslate2 Whisper models.
     repo_id: str = ""
+    family: ModelFamily = ModelFamily.GENERAL
     #: Direct download used by tools that are not fetched from Hugging Face.
     url: str = ""
     #: PyPI distributions bundled into an acceleration pack.
@@ -41,6 +51,9 @@ class Component:
     required: bool = False
     notes: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+
+    #: Set for models installed by repository search rather than shipped in the catalog.
+    custom: bool = False
 
     @property
     def is_model(self) -> bool:
@@ -150,6 +163,66 @@ _MODELS: tuple[Component, ...] = (
         speed="Slow",
         tags=("best-quality",),
     ),
+    # --- Japanese fine-tunes -------------------------------------------
+    Component(
+        key="model:kotoba-v2",
+        name="Kotoba Whisper v2.0",
+        kind=ComponentKind.MODEL,
+        summary="Distilled specifically for Japanese. Faster than Large v3 and often more accurate on it.",
+        approx_size=1450 * MB,
+        repo_id="kotoba-tech/kotoba-whisper-v2.0-faster",
+        model_alias="kotoba-v2",
+        quality="Excellent (Japanese)",
+        speed="Fast",
+        family=ModelFamily.JAPANESE,
+        tags=("japanese",),
+        notes="Japanese only. Trained on the ReazonSpeech corpus by Kotoba Technologies.",
+    ),
+    Component(
+        key="model:kotoba-bilingual",
+        name="Kotoba Whisper Bilingual v1.0",
+        kind=ComponentKind.MODEL,
+        summary="Japanese and English in one model, including direct Japanese-to-English speech translation.",
+        approx_size=1450 * MB,
+        repo_id="kotoba-tech/kotoba-whisper-bilingual-v1.0-faster",
+        model_alias="kotoba-bilingual",
+        quality="Very good",
+        speed="Fast",
+        family=ModelFamily.JAPANESE,
+        tags=("japanese", "bilingual"),
+    ),
+    Component(
+        key="model:large-v2-ja",
+        name="Whisper Large v2 (Japanese tuned)",
+        kind=ComponentKind.MODEL,
+        summary="Large v2 fine-tuned a further 5k steps on Japanese. Heavy, but strong on hard audio.",
+        approx_size=2950 * MB,
+        repo_id="zh-plus/faster-whisper-large-v2-japanese-5k-steps",
+        model_alias="large-v2-ja",
+        quality="Excellent (Japanese)",
+        speed="Slow",
+        family=ModelFamily.JAPANESE,
+        tags=("japanese",),
+    ),
+)
+
+# --- Translation ----------------------------------------------------------
+# CTranslate2 and tokenizers already ship with faster-whisper, so offline
+# translation needs a model download and no extra Python dependency.
+
+_TRANSLATION_MODELS: tuple[Component, ...] = (
+    Component(
+        key="translate:nllb-200-600m",
+        name="NLLB-200 offline translator",
+        kind=ComponentKind.TRANSLATION,
+        summary="Translates subtitles into roughly 200 languages on your own machine. No account, no API key.",
+        approx_size=1200 * MB,
+        repo_id="JustFrederik/nllb-200-distilled-600M-ct2-float16",
+        quality="Good",
+        speed="Fast",
+        recommended=True,
+        notes="Meta's distilled 600M model. Solid on ordinary dialogue; proper nouns and slang are where online engines pull ahead.",
+    ),
 )
 
 # --- ffmpeg ---------------------------------------------------------------
@@ -227,6 +300,54 @@ def models() -> tuple[Component, ...]:
     return _MODELS
 
 
+def models_by_family() -> dict[ModelFamily, tuple[Component, ...]]:
+    """Speech models grouped for display, preserving catalog order."""
+
+    grouped: dict[ModelFamily, list[Component]] = {}
+    for item in _MODELS:
+        grouped.setdefault(item.family, []).append(item)
+    return {family: tuple(items) for family, items in grouped.items()}
+
+
+def translation_models() -> tuple[Component, ...]:
+    return _TRANSLATION_MODELS
+
+
+def default_translation_model() -> Component:
+    return _TRANSLATION_MODELS[0]
+
+
+def custom_model(repo_id: str, *, approx_size: int = 0, name: str = "") -> Component:
+    """Build a catalog entry for a repository the user found through search."""
+
+    slug = custom_slug(repo_id)
+    return Component(
+        key=f"model:hf:{repo_id}",
+        name=name or repo_id.split("/")[-1],
+        kind=ComponentKind.MODEL,
+        summary=f"Downloaded from Hugging Face: {repo_id}",
+        approx_size=approx_size,
+        repo_id=repo_id,
+        model_alias=slug,
+        family=ModelFamily.CUSTOM,
+        custom=True,
+    )
+
+
+def custom_slug(repo_id: str) -> str:
+    """Folder-safe identifier for a Hugging Face repository.
+
+    The owner separator becomes a double underscore so ``owner/name`` cannot
+    collide with a repository actually called ``owner_name``.
+    """
+
+    marked = repo_id.strip().replace("/", "__")
+    cleaned = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_" for char in marked
+    )
+    return cleaned.strip("._") or "custom-model"
+
+
 def cuda_component() -> Component | None:
     """The GPU pack, when the current platform can actually use it."""
 
@@ -238,6 +359,7 @@ def cuda_component() -> Component | None:
 def all_components() -> tuple[Component, ...]:
     items: list[Component] = [ffmpeg_component()]
     items.extend(_MODELS)
+    items.extend(_TRANSLATION_MODELS)
     cuda = cuda_component()
     if cuda:
         items.append(cuda)

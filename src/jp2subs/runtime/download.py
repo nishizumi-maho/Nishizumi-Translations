@@ -64,6 +64,44 @@ def fetch_json(url: str, *, headers: dict[str, str] | None = None, timeout: int 
     return json.loads(fetch_bytes(url, headers=merged, timeout=timeout).decode("utf-8"))
 
 
+def post_json(
+    url: str,
+    payload: Any,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = NETWORK_TIMEOUT,
+) -> Any:
+    """POST a JSON body and decode the JSON response."""
+
+    body = json.dumps(payload).encode("utf-8")
+    merged = {"Content-Type": "application/json", "Accept": "application/json"}
+    if headers:
+        merged.update(headers)
+    request = urllib.request.Request(url, data=body, headers={**{"User-Agent": USER_AGENT}, **merged})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def post_form(
+    url: str,
+    fields: list[tuple[str, str]],
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = NETWORK_TIMEOUT,
+) -> Any:
+    """POST url-encoded fields, repeating keys where a list is needed."""
+
+    import urllib.parse
+
+    body = urllib.parse.urlencode(fields).encode("utf-8")
+    merged = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+    if headers:
+        merged.update(headers)
+    request = urllib.request.Request(url, data=body, headers={**{"User-Agent": USER_AGENT}, **merged})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def remote_size(url: str, *, timeout: int = NETWORK_TIMEOUT) -> int:
     """Content length for ``url``, or 0 when the server will not say."""
 

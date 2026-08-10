@@ -34,9 +34,19 @@ def app_config_dir() -> Path:
 
 @dataclass
 class TranslationConfig:
-    mode: str = "disabled"
-    provider: str = "external"
+    enabled: bool = False
+    #: "offline", "deepl" or "openai".
+    provider: str = "offline"
     target_languages: list[str] = field(default_factory=list)
+    #: Also write a track with Japanese on top and the translation underneath.
+    bilingual: bool = False
+    deepl_api_key: str | None = None
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
+
+    # Retained so older config files keep loading cleanly.
+    mode: str = "disabled"
     api_url: str | None = None
     api_key: str | None = None
     llama_binary: str | None = None
