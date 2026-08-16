@@ -1,7 +1,5 @@
 # Nishizumi Translations
 
-![unnamed](https://github.com/user-attachments/assets/210bd1f7-f8b0-4cba-aa75-e89a92796484)
-
 Turn Japanese audio and video into transcripts and subtitle files. Drop a file in, pick a model, get `srt`/`vtt`/`ass` out — optionally translated into another language — then attach, embed or burn the result into your video.
 
 **There is nothing to install by hand.** The app downloads and installs its own Whisper models, its own FFmpeg, and (optionally) the NVIDIA GPU libraries. You choose what you want from the **Components** page and it handles the rest.
