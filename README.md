@@ -238,6 +238,8 @@ Which writes `dist/installer/Nishizumi-Translations-Setup-2.1.0.exe`.
 
 Releases are automated: pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds the bundle, compiles the installer, and attaches it plus a SHA-256 checksum to the GitHub release. The workflow fails if the tag does not match `jp2subs.__version__`.
 
+The same workflow can be started by hand from the **Actions** tab — give it a tag such as `v2.3.0` and the branch to cut it from (`main` by default). It builds an existing tag as-is, and creates the tag itself when there is none yet, after the version check passes. That is the route to use when you cannot push a tag from where you are working.
+
 The app icon is generated from the logo the UI draws:
 
 ```bash

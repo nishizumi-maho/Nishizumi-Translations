@@ -7,8 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and publish (for example v2.1.0)"
+        description: "Tag to build and publish (for example v2.3.0). Created when it does not exist yet."
         required: true
+        type: string
+      source:
+        description: "Branch or commit the tag is cut from, when the tag does not exist yet."
+        required: false
+        default: "main"
         type: string
 
 permissions:
@@ -21,7 +26,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          # A tag push builds that tag; a manual run starts from the branch, so
+          # the tag can be cut here when it does not exist yet.
+          ref: ${{ inputs.source || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the ref
+        id: ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          EXISTS=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "$TAG already exists; building the tagged commit."
+              git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+              git checkout --detach "refs/tags/$TAG"
+            else
+              echo "$TAG does not exist yet; it will be cut from $(git rev-parse --short HEAD) after the version check."
+              EXISTS=false
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,7 +60,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
+          TAG="${{ steps.ref.outputs.tag }}"
           VERSION="${TAG#v}"
           PKG=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/jp2subs/__init__.py').read_text()).group(1))")
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -42,6 +70,18 @@ jobs:
             echo "::error::Tag $TAG does not match jp2subs.__version__ ($PKG). Bump the package version first."
             exit 1
           fi
+
+      # Only once the tree is known to carry the matching version, so a failed
+      # check never leaves a tag behind.
+      - name: Create the tag
+        if: steps.ref.outputs.exists != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.ref.outputs.tag }}" -m "Nishizumi Translations ${{ steps.version.outputs.version }}"
+          git push origin "refs/tags/${{ steps.ref.outputs.tag }}"
 
       - name: Install dependencies
         run: |
