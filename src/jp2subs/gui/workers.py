@@ -226,6 +226,41 @@ class ComponentInstallWorker(QtCore.QRunnable if QtCore else object):  # type: i
         self.signals.detail.emit(self.key, _format_progress(progress))
 
 
+class StorageSignals(QtCore.QObject if QtCore else object):  # type: ignore[misc]
+    if QtCore:  # pragma: no cover - type guarded
+        #: bytes moved, bytes total, current file
+        progress = QtCore.Signal(int, int, str)
+        #: the folder now in use
+        finished = QtCore.Signal(str)
+        failed = QtCore.Signal(str)
+
+
+class RelocateWorker(QtCore.QRunnable if QtCore else object):  # type: ignore[misc]
+    """Points the app at another folder, carrying the downloads across."""
+
+    def __init__(self, target: Path | None, move_existing: bool = True):
+        super().__init__()
+        self.target = target
+        self.move_existing = move_existing
+        self.signals = StorageSignals()
+
+    def run(self):  # pragma: no cover - GUI thread
+        from ..runtime import store
+
+        try:
+            location = store.set_data_dir(
+                self.target, move_existing=self.move_existing, on_progress=self._on_progress
+            )
+            manager.rebase()
+        except Exception as exc:  # noqa: BLE001
+            self.signals.failed.emit(str(exc))
+            return
+        self.signals.finished.emit(str(location))
+
+    def _on_progress(self, moved: int, total: int, detail: str) -> None:  # pragma: no cover - GUI thread
+        self.signals.progress.emit(moved, total, detail)
+
+
 class SearchSignals(QtCore.QObject if QtCore else object):  # type: ignore[misc]
     if QtCore:  # pragma: no cover - type guarded
         #: list[SearchResult]

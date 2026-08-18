@@ -6,6 +6,12 @@
 ;
 ; Installs per-user by default so updating never needs an admin prompt, which
 ; is what lets the in-app updater run the installer unattended.
+;
+; Two folders are chosen by the user: the program itself (the standard
+; destination page) and the folder the multi-gigabyte Whisper models download
+; into. The second one is written to %APPDATA%\jp2subs\data_location.json,
+; which is the same pointer file the app writes when the folder is changed from
+; the Settings page.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
@@ -79,22 +85,145 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 Type: filesandordirs; Name: "{app}\__pycache__"
 
 [Code]
-// Downloaded models and ffmpeg live outside {app}; offer to remove them too,
-// since they can be several gigabytes.
+// The program folder comes from the standard destination page; this extra page
+// picks where the downloaded models, FFmpeg and GPU libraries live, so a small
+// system drive never has to hold several gigabytes of speech models.
+var
+  DataDirPage: TInputDirWizardPage;
+
+function DefaultDataDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}\jp2subs');
+end;
+
+function PointerFile(): String;
+begin
+  Result := ExpandConstant('{userappdata}\jp2subs\data_location.json');
+end;
+
+procedure InitializeWizard;
+begin
+  DataDirPage := CreateInputDirPage(wpSelectDir,
+    'Select Model Folder',
+    'Where should the speech models and FFmpeg be stored?',
+    'Nishizumi Translations downloads several gigabytes of Whisper models on first run.' + #13#10 +
+    'Pick any drive with room to spare — it does not have to be the drive the program is installed on.' + #13#10 + #13#10 +
+    'Click Next to continue.',
+    False, '');
+  DataDirPage.Add('');
+  DataDirPage.Values[0] := GetPreviousData('DataDir', DefaultDataDir());
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'DataDir', DataDirPage.Values[0]);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  Chosen: String;
+begin
+  Result := True;
+  if (DataDirPage <> nil) and (CurPageID = DataDirPage.ID) then
+  begin
+    Chosen := Trim(DataDirPage.Values[0]);
+    if Chosen = '' then
+    begin
+      MsgBox('Choose a folder for the models and tools.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    // Creating it now surfaces a wrong drive letter here rather than halfway
+    // through a 3 GB download.
+    if not ForceDirectories(Chosen) then
+    begin
+      MsgBox('Setup could not create:' + #13#10 + Chosen + #13#10 + #13#10 +
+             'Choose another folder.', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
+function JsonEscape(const Value: String): String;
+begin
+  Result := Value;
+  StringChangeEx(Result, '\', '\\', True);
+  StringChangeEx(Result, '"', '\"', True);
+end;
+
+procedure SaveDataLocation();
+var
+  Chosen: String;
+begin
+  Chosen := Trim(DataDirPage.Values[0]);
+  // No pointer file means "use the standard per-user folder", so the default
+  // choice is recorded by removing any pointer an earlier install left behind.
+  if CompareText(RemoveBackslashUnlessRoot(Chosen), RemoveBackslashUnlessRoot(DefaultDataDir())) = 0 then
+  begin
+    DeleteFile(PointerFile());
+    Exit;
+  end;
+  ForceDirectories(ExpandConstant('{userappdata}\jp2subs'));
+  SaveStringToFile(PointerFile(),
+    '{' + #13#10 + '  "data_dir": "' + JsonEscape(Chosen) + '"' + #13#10 + '}' + #13#10, False);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SaveDataLocation();
+end;
+
+function ConfiguredDataDir(): String;
+var
+  Lines: TArrayOfString;
+  I, Position: Integer;
+  Line, Value: String;
+begin
+  Result := DefaultDataDir();
+  if not LoadStringsFromFile(PointerFile(), Lines) then
+    Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Lines[I];
+    Position := Pos('"data_dir"', Line);
+    if Position = 0 then
+      Continue;
+    Line := Copy(Line, Position + Length('"data_dir"'), Length(Line));
+    Position := Pos('"', Line);
+    if Position = 0 then
+      Continue;
+    Line := Copy(Line, Position + 1, Length(Line));
+    Position := Pos('"', Line);
+    if Position = 0 then
+      Continue;
+    Value := Trim(Copy(Line, 1, Position - 1));
+    StringChangeEx(Value, '\\', '\', True);
+    if Value <> '' then
+      Result := Value;
+    Exit;
+  end;
+end;
+
+// Downloaded models and ffmpeg live outside {app} — wherever the user put them
+// — so offer to remove them too, since they can be several gigabytes.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    DataDir := ExpandConstant('{localappdata}\jp2subs');
+    DataDir := ConfiguredDataDir();
     if DirExists(DataDir) then
     begin
       if MsgBox('Also delete the downloaded Whisper models and FFmpeg?' + #13#10 + #13#10 +
                 DataDir + #13#10 + #13#10 +
                 'Choose No to keep them for a future install.',
                 mbConfirmation, MB_YESNO) = IDYES then
+      begin
         DelTree(DataDir, True, True, True);
+        DeleteFile(PointerFile());
+      end;
     end;
   end;
 end;

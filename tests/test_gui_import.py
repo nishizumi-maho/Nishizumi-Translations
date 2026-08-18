@@ -68,3 +68,23 @@ def test_ass_colour_conversion_roundtrips():
     assert color_from_ass("&H00FFFFFF").name() == "#ffffff"
     assert color_from_ass("&H000000FF").name() == "#ff0000"
     assert color_from_ass("garbage").name() == "#ffffff"
+
+
+def test_settings_page_shows_where_components_are_installed(monkeypatch, tmp_path):
+    pytest.importorskip("PySide6")
+    from PySide6 import QtWidgets
+
+    from jp2subs.runtime import store
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "config"))
+    monkeypatch.setenv(store.ENV_DATA_DIR, str(tmp_path / "components"))
+    QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    from jp2subs.gui.pages.settings import SettingsPage
+
+    page = SettingsPage()
+
+    assert page.location_edit.text() == str(tmp_path / "components")
+    # The environment variable pins the folder, so the buttons stay unavailable.
+    assert not page.location_change_btn.isEnabled()
+    assert not page.location_reset_btn.isEnabled()

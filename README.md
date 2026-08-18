@@ -2,7 +2,7 @@
 
 Turn Japanese audio and video into transcripts and subtitle files. Drop a file in, pick a model, get `srt`/`vtt`/`ass` out — optionally translated into another language — then attach, embed or burn the result into your video.
 
-**There is nothing to install by hand.** The app downloads and installs its own Whisper models, its own FFmpeg, and (optionally) the NVIDIA GPU libraries. You choose what you want from the **Components** page and it handles the rest.
+**There is nothing to install by hand.** The app downloads and installs its own Whisper models, its own FFmpeg, and (optionally) the NVIDIA GPU libraries. You choose what you want — and which drive it all goes on — from the **Components** page, and it handles the rest.
 
 > The Python package and command line tool are still called `jp2subs`.
 
@@ -13,7 +13,8 @@ Turn Japanese audio and video into transcripts and subtitle files. Drop a file i
 Download `Nishizumi-Translations-Setup-<version>.exe` from the [latest release](https://github.com/nishizumi-maho/Nishizumi-Translations/releases/latest) and run it.
 
 - Installs per user, so there is no admin prompt.
-- On first launch a short setup screen offers FFmpeg and a speech model.
+- Setup asks for two folders: the program itself, and where the models are downloaded. Point the second one at a roomier drive if the system disk is tight.
+- On first launch a short setup screen offers FFmpeg and a speech model, and lets you change the model folder again before anything downloads.
 - The app checks for new versions on startup and can update itself from the **About** page.
 
 ### From source (any platform)
@@ -97,17 +98,23 @@ Also here:
 
 Downloads resume if interrupted, can be cancelled, and are checked for free disk space first. **Remove** deletes a component again.
 
-Everything lands in a single folder:
+Everything lands in a single folder, which by default is:
 
 - Windows: `%LOCALAPPDATA%\jp2subs`
 - macOS: `~/Library/Application Support/jp2subs`
 - Linux: `$XDG_DATA_HOME/jp2subs` or `~/.local/share/jp2subs`
 
-Set `JP2SUBS_DATA_DIR` to put it somewhere else.
+#### Installing on another drive
+
+Models run from a few hundred megabytes to several gigabytes, so the folder does not have to be on the system disk. Change it from **Components → Change location**, from **Settings → Install location**, or during Windows setup.
+
+Pick any folder on any drive — `D:\jp2subs`, an external disk, a NAS mount. The app offers to carry everything already downloaded across, so installed models keep working without being downloaded again; it warns first if the destination is short on space. Choosing a folder that already holds other files is declined, so removing a component can never delete anything of yours.
+
+The choice is recorded in `data_location.json` next to `config.toml`, and applies to models, FFmpeg, the GPU libraries and the update cache alike. `JP2SUBS_DATA_DIR` still overrides everything, which is handy for a portable install on a USB stick.
 
 ### Settings
 
-Theme (dark or light, applied immediately), update preferences, translation engine keys, an optional FFmpeg path override, and the defaults used for every new run. Saved to:
+Theme (dark or light, applied immediately), update preferences, translation engine keys, an optional FFmpeg path override, the install location for downloaded components, and the defaults used for every new run. Saved to:
 
 - Windows: `%APPDATA%\jp2subs\config.toml`
 - other: `~/.config/jp2subs/config.toml`
@@ -125,6 +132,7 @@ The GUI is one command away — `jp2subs ui` — but everything is scriptable.
 ```bash
 jp2subs setup                          # ffmpeg + the recommended model
 jp2subs setup --model small --gpu      # a specific model, plus the CUDA libraries
+jp2subs setup --data-dir D:\\jp2subs    # install everything on another drive
 jp2subs components list                # what is installed, and what it costs
 jp2subs components search "whisper japanese"
 jp2subs components install large-v3
@@ -132,6 +140,9 @@ jp2subs components install kotoba-tech/kotoba-whisper-v2.0-faster
 jp2subs components install translator  # the offline translation model
 jp2subs components remove tiny
 jp2subs components path                # where downloads live
+jp2subs components location            # that folder, plus space used and free
+jp2subs components location D:\\jp2subs # move everything to another drive
+jp2subs components location --default  # back to the standard per-user folder
 jp2subs deps doctor                    # check the whole setup
 ```
 
@@ -236,7 +247,7 @@ python assets/generate_icon.py
 ## Repository layout
 
 - `src/jp2subs/` — CLI, pipeline, ASR, subtitles, FFmpeg helpers
-- `src/jp2subs/runtime/` — the self-install layer: catalog, search, downloader, component manager, updater
+- `src/jp2subs/runtime/` — the self-install layer: catalog, search, downloader, component manager, storage location, updater
 - `src/jp2subs/translation/` — language registry and the offline/DeepL/OpenAI engines
 - `src/jp2subs/gui/` — theme, shared widgets, and one module per page under `pages/`
 - `installer/` — Inno Setup script
