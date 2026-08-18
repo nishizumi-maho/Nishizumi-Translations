@@ -259,14 +259,111 @@ def components_path():
     console.print(str(runtime_store.data_dir()))
 
 
+@components_app.command("location")
+def components_location(
+    folder: str = typer.Argument("", help="Folder to install models and tools into."),
+    move: bool = typer.Option(
+        True, "--move/--no-move", help="Carry what is already installed to the new folder."
+    ),
+    default: bool = typer.Option(
+        False, "--default", help="Go back to the standard per-user folder."
+    ),
+):
+    """Show or change where models, ffmpeg and GPU libraries are installed."""
+
+    if not folder and not default:
+        _print_location()
+        return
+
+    forced = runtime_store.env_override()
+    if forced:
+        console.print(
+            f"[yellow]{runtime_store.ENV_DATA_DIR} is set to {forced}[/yellow] and wins over "
+            "any saved folder. Clear it first."
+        )
+        raise typer.Exit(code=1)
+
+    target = None if default else strip_quotes(folder)
+    if target is not None:
+        problem = runtime_store.validate_location(target)
+        if problem:
+            console.print(f"[red]{problem}[/red]")
+            raise typer.Exit(code=1)
+
+    source = runtime_store.data_dir()
+    size = runtime_store.dir_size(source) if move else 0
+    if size:
+        console.print(f"Moving {runtime_store.human_size(size)} from [bold]{source}[/bold]...")
+        progress = Progress(
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("{task.fields[detail]}"),
+            console=console,
+        )
+        task_id = progress.add_task("Moving components", total=100, detail="")
+
+        def on_progress(moved: int, total: int, detail: str) -> None:
+            progress.update(
+                task_id, completed=int(moved * 100 / total) if total else 0, detail=detail
+            )
+
+        with progress:
+            location = runtime_store.set_data_dir(
+                target, move_existing=True, on_progress=on_progress
+            )
+    else:
+        location = runtime_store.set_data_dir(target, move_existing=move)
+
+    component_manager.rebase()
+    console.print(f"[green]Components now live in[/green] {location}")
+
+
+def _print_location() -> None:
+    """Where components live today, and how much room that drive has left."""
+
+    current = runtime_store.data_dir()
+    forced = runtime_store.env_override()
+    console.print(f"Install location: [bold]{current}[/bold]")
+    if forced:
+        console.print(f"Set by {runtime_store.ENV_DATA_DIR}.")
+    elif runtime_store.is_custom_location():
+        console.print(f"Chosen by you, recorded in {runtime_store.location_file()}.")
+    else:
+        console.print("Standard per-user folder.")
+    used = component_manager.total_size()
+    free = runtime_store.human_size(runtime_store.free_space())
+    console.print(
+        f"{runtime_store.human_size(used)} used · {free} free"
+        if used
+        else f"Nothing downloaded yet · {free} free"
+    )
+    console.print(
+        "Change it with: [bold]jp2subs components location D:\\jp2subs[/bold]"
+    )
+
+
 @app.command(name="setup")
 def setup_cmd(
     model: str = typer.Option(
         "", "--model", help="Model to install (default: the recommended one). Use 'none' to skip."
     ),
     gpu: bool = typer.Option(False, "--gpu", help="Also install the NVIDIA acceleration libraries."),
+    data_dir: str = typer.Option(
+        "", "--data-dir", help="Install models and tools here instead of the default folder."
+    ),
 ):
     """Install everything jp2subs needs to run: ffmpeg and a speech model."""
+
+    if data_dir:
+        target = strip_quotes(data_dir)
+        problem = runtime_store.validate_location(target)
+        if problem:
+            console.print(f"[red]{problem}[/red]")
+            raise typer.Exit(code=1)
+        location = runtime_store.set_data_dir(target, move_existing=True)
+        component_manager.rebase()
+        console.print(f"Installing into [bold]{location}[/bold]")
 
     if not component_manager.is_installed("tool:ffmpeg") and not config.detect_ffmpeg(None):
         _install_with_progress("tool:ffmpeg")

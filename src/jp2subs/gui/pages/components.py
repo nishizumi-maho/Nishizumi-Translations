@@ -7,6 +7,7 @@ from ...runtime import catalog, store
 from ...runtime.catalog import Component, ComponentKind
 from ...runtime.manager import manager
 from ..common import Banner, Card, IconButton, ScrollPage, StatusChip, hline, label, reveal
+from ..storage import change_location
 from ..workers import ComponentInstallWorker, ModelSearchWorker
 
 
@@ -265,6 +266,11 @@ class ComponentsPage(ScrollPage):
         folder_btn.clicked.connect(lambda: reveal(store.data_dir()))
         self.header.add_action(folder_btn)
 
+        location_btn = IconButton("Change location", "sliders")
+        location_btn.setToolTip("Install models and tools on another drive.")
+        location_btn.clicked.connect(self._change_location)
+        self.header.add_action(location_btn)
+
         refresh_btn = IconButton("Refresh", "refresh")
         refresh_btn.clicked.connect(self.refresh)
         self.header.add_action(refresh_btn)
@@ -472,6 +478,11 @@ class ComponentsPage(ScrollPage):
         self._refresh_installed_custom()
         self._update_summary()
         self.components_changed.emit()
+
+    def _change_location(self) -> None:
+        if change_location(self):
+            self.refresh()
+            self.components_changed.emit()
 
     def refresh(self) -> None:
         manager.refresh()

@@ -8,6 +8,7 @@ from ...runtime import store
 from ...runtime.manager import manager
 from ..common import Card, Collapsible, IconButton, ScrollPage, label, reveal
 from ..state import load_app_state, persist_app_state
+from ..storage import change_location, location_summary, reset_location
 from .transcribe import parse_extra_args
 
 
@@ -145,7 +146,31 @@ class SettingsPage(ScrollPage):
         self.ffmpeg_status = label("", "Faint")
         form.addRow("", self.ffmpeg_status)
 
+        location_row = QtWidgets.QHBoxLayout()
+        location_row.setSpacing(8)
+        self.location_edit = QtWidgets.QLineEdit()
+        self.location_edit.setReadOnly(True)
+        self.location_edit.setToolTip(
+            "Models, FFmpeg and the GPU libraries are installed here. Any drive will do."
+        )
+        self.location_change_btn = QtWidgets.QPushButton("Change")
+        self.location_change_btn.clicked.connect(self._change_location)
+        self.location_reset_btn = QtWidgets.QPushButton("Use default")
+        self.location_reset_btn.clicked.connect(self._reset_location)
+        location_row.addWidget(self.location_edit, 1)
+        location_row.addWidget(self.location_change_btn, 0)
+        location_row.addWidget(self.location_reset_btn, 0)
+        form.addRow("Install location", location_row)
+
         card.body.addLayout(form)
+        card.body.addWidget(
+            label(
+                "Models are several gigabytes each. Point this at another disk if the "
+                "system drive is tight — the change applies immediately, and the app "
+                "offers to carry anything already downloaded across.",
+                "Faint",
+            )
+        )
 
         row = QtWidgets.QHBoxLayout()
         self.storage_label = label("", "CardHint")
@@ -159,6 +184,18 @@ class SettingsPage(ScrollPage):
         card.body.addLayout(row)
 
         self.content.addWidget(card)
+
+    # -- storage location -------------------------------------------------
+
+    def _change_location(self) -> None:
+        if change_location(self):
+            self.refresh_components()
+            self.settings_saved.emit()
+
+    def _reset_location(self) -> None:
+        if reset_location(self):
+            self.refresh_components()
+            self.settings_saved.emit()
 
     def _build_defaults_card(self) -> None:
         card = Card("Transcription defaults", "Used for every new run.", icon_name="sliders")
@@ -300,12 +337,16 @@ class SettingsPage(ScrollPage):
             self.ffmpeg_status.setText(
                 f"Using ffmpeg from PATH: {resolved}" if resolved else "No ffmpeg available yet."
             )
-        total = manager.total_size()
-        self.storage_label.setText(
-            f"{store.human_size(total)} of components in {store.data_dir()}"
-            if total
-            else f"Nothing downloaded yet. Components will go to {store.data_dir()}"
-        )
+        self._refresh_location()
+
+    def _refresh_location(self) -> None:
+        forced = store.env_override()
+        self.location_edit.setText(str(store.data_dir()))
+        self.location_change_btn.setEnabled(forced is None)
+        self.location_reset_btn.setEnabled(forced is None and store.is_custom_location())
+        if forced:
+            self.location_edit.setToolTip(f"Set by {store.ENV_DATA_DIR}.")
+        self.storage_label.setText(location_summary())
 
     def _refresh_translation_status(self) -> None:
         from ...translation import available_engines

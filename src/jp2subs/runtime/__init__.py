@@ -17,7 +17,15 @@ from .catalog import (
 )
 from .manager import ComponentManager, ComponentStatus
 from .manager import manager as component_manager
-from .store import data_dir, human_size, models_dir, tools_dir
+from .store import (
+    data_dir,
+    default_data_dir,
+    human_size,
+    models_dir,
+    set_data_dir,
+    tools_dir,
+    validate_location,
+)
 
 # NOTE: the singleton is exported as ``component_manager`` on purpose — binding
 # it to ``manager`` here would shadow the ``jp2subs.runtime.manager`` module.
@@ -31,10 +39,13 @@ __all__ = [
     "component",
     "component_manager",
     "data_dir",
+    "default_data_dir",
     "ffmpeg_component",
     "human_size",
     "models",
     "models_dir",
     "recommended_model_key",
+    "set_data_dir",
     "tools_dir",
+    "validate_location",
 ]

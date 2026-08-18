@@ -8,6 +8,7 @@ from ..runtime import catalog, store
 from ..runtime.manager import manager
 from . import icons
 from .common import Card, IconButton, StatusChip, hline, label
+from .storage import change_location
 from .workers import ComponentInstallWorker
 
 #: Offered on first run. The full catalog stays available on the Components page.
@@ -24,6 +25,7 @@ class SetupDialog(QtWidgets.QDialog):
         self.resize(660, 620)
 
         self._queue: list[str] = []
+        self._done_mode = False
         self._worker: ComponentInstallWorker | None = None
         self._failed: list[str] = []
 
@@ -43,6 +45,7 @@ class SetupDialog(QtWidgets.QDialog):
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
 
+        self._build_location_card()
         self._build_ffmpeg_card()
         self._build_model_card()
         self._body.addStretch(1)
@@ -68,13 +71,45 @@ class SetupDialog(QtWidgets.QDialog):
         text.addWidget(label(f"Welcome to {branding.APP_NAME}", "PageTitle"))
         text.addWidget(
             label(
-                "Two things get downloaded once, then you are set. Everything lands in your "
-                "user folder and can be removed from the Components page later.",
+                "Two things get downloaded once, then you are set. Pick the drive they "
+                "land on below — everything can be moved or removed later.",
                 "PageSubtitle",
             )
         )
         row.addLayout(text, 1)
         return row
+
+    def _build_location_card(self) -> None:
+        self._location_card = Card(
+            "Install location",
+            "Models are large. Any drive with room works — it does not have to be the "
+            "one the app is installed on.",
+            icon_name="folder",
+        )
+        self._location_value = label("", "CardTitle")
+        self._location_card.body.addWidget(self._location_value)
+        self._location_hint = label("", "Faint")
+        self._location_card.body.addWidget(self._location_hint)
+
+        row = QtWidgets.QHBoxLayout()
+        change = IconButton("Change folder", "folder")
+        change.clicked.connect(self._change_location)
+        row.addWidget(change, 0)
+        row.addStretch(1)
+        self._location_card.body.addLayout(row)
+
+        self._body.addWidget(self._location_card)
+
+    def _change_location(self) -> None:
+        if change_location(self):
+            self._refresh()
+
+    def _refresh_location(self) -> None:
+        self._location_value.setText(str(store.data_dir()))
+        free = store.free_space()
+        self._location_hint.setText(
+            f"{store.human_size(free)} free on that drive." if free else ""
+        )
 
     def _build_ffmpeg_card(self) -> None:
         component = catalog.ffmpeg_component()
@@ -186,6 +221,7 @@ class SetupDialog(QtWidgets.QDialog):
 
     def _refresh(self) -> None:
         manager.refresh()
+        self._refresh_location()
 
         ffmpeg_ready = manager.is_installed("tool:ffmpeg") or _ffmpeg_on_path()
         self._ffmpeg_chip.set_status(
@@ -201,16 +237,32 @@ class SetupDialog(QtWidgets.QDialog):
         else:
             self._model_chip.set_status("None installed", "neutral")
 
+        # A location change can make installed models appear or disappear, so
+        # every row is restated rather than only ever being disabled.
         for key, radio in self._model_buttons.items():
-            if manager.is_installed(key):
-                radio.setText(f"{catalog.component(key).name} (installed)")
-                radio.setEnabled(False)
+            component = catalog.component(key)
+            name = component.name if component else key
+            here = manager.is_installed(key)
+            radio.setText(f"{name} (installed)" if here else name)
+            radio.setEnabled(not here)
 
-        if ffmpeg_ready and installed:
+        self._set_done_mode(bool(ffmpeg_ready and installed))
+
+    def _set_done_mode(self, done: bool) -> None:
+        """Swap the primary button between installing and closing the dialog."""
+
+        if done is self._done_mode:
+            return
+        self._done_mode = done
+        self._install_btn.clicked.disconnect()
+        if done:
             self._install_btn.setText("Done")
-            self._install_btn.clicked.disconnect()
             self._install_btn.clicked.connect(self.accept)
             self._status.setText("Everything is in place.")
+        else:
+            self._install_btn.setText("Install and continue")
+            self._install_btn.clicked.connect(self._start)
+            self._status.setText("")
 
     def _pending_keys(self) -> list[str]:
         keys: list[str] = []

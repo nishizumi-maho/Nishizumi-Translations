@@ -4,7 +4,7 @@ from pathlib import Path
 
 import jp2subs
 from jp2subs import branding
-from jp2subs.runtime import updater
+from jp2subs.runtime import store, updater
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -35,3 +35,18 @@ def test_installer_script_declares_the_matching_app_name():
 
     assert f'#define MyAppName "{branding.APP_NAME}"' in script
     assert "PrivilegesRequired=lowest" in script
+
+
+def test_installer_lets_the_user_pick_the_model_folder():
+    script = (ROOT / "installer" / "jp2subs.iss").read_text(encoding="utf-8")
+
+    # The wizard page and the app must agree on the pointer file, or a folder
+    # chosen during setup would be ignored on first run.
+    assert "CreateInputDirPage" in script
+    assert store.LOCATION_FILE in script
+    assert '"data_dir"' in script
+    # The uninstaller has to look the folder up rather than assume the default.
+    assert "ConfiguredDataDir" in script
+    # An unattended update must keep a folder the user chose inside the app,
+    # so the wizard starts from the pointer file rather than the default.
+    assert "GetPreviousData('DataDir', ConfiguredDataDir())" in script

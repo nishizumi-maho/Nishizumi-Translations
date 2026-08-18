@@ -159,6 +159,28 @@ class ComponentManager:
 
         self._manifest_cache = None
 
+    def rebase(self) -> None:
+        """Re-read the manifest and repoint it at the current data directory.
+
+        Called after the user moves their components to another drive: the
+        manifest travels with the files, so only the absolute paths it records
+        are stale.
+        """
+
+        self.refresh()
+        manifest = self._manifest()
+        changed = False
+        for key, record in manifest.items():
+            item = self._resolve_component(key)
+            if not item:
+                continue
+            path = str(self.install_path(item))
+            if record.get("path") != path:
+                record["path"] = path
+                changed = True
+        if changed:
+            self._write_manifest()
+
     # -- paths ------------------------------------------------------------
 
     def install_path(self, item: Component) -> Path:
