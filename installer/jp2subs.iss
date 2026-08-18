@@ -101,17 +101,51 @@ begin
   Result := ExpandConstant('{userappdata}\jp2subs\data_location.json');
 end;
 
+// Reads the folder the app is using today. The app writes this same file when
+// the location is changed from its Settings page, so an unattended update
+// carries that choice forward instead of resetting it.
+function ConfiguredDataDir(): String;
+var
+  Lines: TArrayOfString;
+  I, Position: Integer;
+  Line, Value: String;
+begin
+  Result := DefaultDataDir();
+  if not LoadStringsFromFile(PointerFile(), Lines) then
+    Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Lines[I];
+    Position := Pos('"data_dir"', Line);
+    if Position = 0 then
+      Continue;
+    Line := Copy(Line, Position + Length('"data_dir"'), Length(Line));
+    Position := Pos('"', Line);
+    if Position = 0 then
+      Continue;
+    Line := Copy(Line, Position + 1, Length(Line));
+    Position := Pos('"', Line);
+    if Position = 0 then
+      Continue;
+    Value := Trim(Copy(Line, 1, Position - 1));
+    StringChangeEx(Value, '\\', '\', True);
+    if Value <> '' then
+      Result := Value;
+    Exit;
+  end;
+end;
+
 procedure InitializeWizard;
 begin
   DataDirPage := CreateInputDirPage(wpSelectDir,
     'Select Model Folder',
     'Where should the speech models and FFmpeg be stored?',
     'Nishizumi Translations downloads several gigabytes of Whisper models on first run.' + #13#10 +
-    'Pick any drive with room to spare — it does not have to be the drive the program is installed on.' + #13#10 + #13#10 +
+    'Pick any drive with room to spare - it does not have to be the drive the program is installed on.' + #13#10 + #13#10 +
     'Click Next to continue.',
     False, '');
   DataDirPage.Add('');
-  DataDirPage.Values[0] := GetPreviousData('DataDir', DefaultDataDir());
+  DataDirPage.Values[0] := GetPreviousData('DataDir', ConfiguredDataDir());
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);
@@ -156,8 +190,8 @@ var
   Chosen: String;
 begin
   Chosen := Trim(DataDirPage.Values[0]);
-  // No pointer file means "use the standard per-user folder", so the default
-  // choice is recorded by removing any pointer an earlier install left behind.
+  // No pointer file means "use the standard per-user folder", so choosing the
+  // default is recorded by removing any pointer an earlier run left behind.
   if CompareText(RemoveBackslashUnlessRoot(Chosen), RemoveBackslashUnlessRoot(DefaultDataDir())) = 0 then
   begin
     DeleteFile(PointerFile());
@@ -174,39 +208,8 @@ begin
     SaveDataLocation();
 end;
 
-function ConfiguredDataDir(): String;
-var
-  Lines: TArrayOfString;
-  I, Position: Integer;
-  Line, Value: String;
-begin
-  Result := DefaultDataDir();
-  if not LoadStringsFromFile(PointerFile(), Lines) then
-    Exit;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-  begin
-    Line := Lines[I];
-    Position := Pos('"data_dir"', Line);
-    if Position = 0 then
-      Continue;
-    Line := Copy(Line, Position + Length('"data_dir"'), Length(Line));
-    Position := Pos('"', Line);
-    if Position = 0 then
-      Continue;
-    Line := Copy(Line, Position + 1, Length(Line));
-    Position := Pos('"', Line);
-    if Position = 0 then
-      Continue;
-    Value := Trim(Copy(Line, 1, Position - 1));
-    StringChangeEx(Value, '\\', '\', True);
-    if Value <> '' then
-      Result := Value;
-    Exit;
-  end;
-end;
-
-// Downloaded models and ffmpeg live outside {app} — wherever the user put them
-// — so offer to remove them too, since they can be several gigabytes.
+// Downloaded models and ffmpeg live outside {app} - wherever the user put them
+// - so offer to remove them too, since they can be several gigabytes.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataDir: String;

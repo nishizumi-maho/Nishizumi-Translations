@@ -47,3 +47,6 @@ def test_installer_lets_the_user_pick_the_model_folder():
     assert '"data_dir"' in script
     # The uninstaller has to look the folder up rather than assume the default.
     assert "ConfiguredDataDir" in script
+    # An unattended update must keep a folder the user chose inside the app,
+    # so the wizard starts from the pointer file rather than the default.
+    assert "GetPreviousData('DataDir', ConfiguredDataDir())" in script
