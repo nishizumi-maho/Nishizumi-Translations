@@ -4,9 +4,14 @@ name: Release Reuniões (experimental)
 # GitHub release is created as a draft and marked as a pre-release, so it never
 # shows up as "Latest" and nobody stumbles onto it from the releases page.
 #
-# Two ways in:
+# Three ways in:
 #   * push a tag such as reuniao-v0.1.0
+#   * push a branch such as publicar/reuniao-v0.1.0, for when tag creation is
+#     restricted: the tag is then cut here, from the version in the package
 #   * run it by hand once this workflow reaches the default branch
+#
+# When the tag already exists it is that commit that gets built, whichever way
+# the run started.
 #
 # The subtitle app has its own release.yml and is untouched by this one.
 
@@ -14,6 +19,8 @@ on:
   push:
     tags:
       - "reuniao-v*"
+    branches:
+      - "publicar/reuniao*"
   workflow_dispatch:
     inputs:
       tag:
@@ -58,45 +65,48 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Resolve the ref
-        id: ref
-        run: |
-          set -euo pipefail
-          TAG="${{ inputs.tag || github.ref_name }}"
-          EXISTS=true
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-              echo "$TAG already exists; building the tagged commit."
-              git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
-              git checkout --detach "refs/tags/$TAG"
-            else
-              echo "$TAG does not exist yet; it will be cut from $(git rev-parse --short HEAD) after the version check."
-              EXISTS=false
-            fi
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
-
-      - name: Check the version matches the tag
+      - name: Resolve the tag, and check it matches the package
         id: version
         run: |
           set -euo pipefail
-          TAG="${{ steps.ref.outputs.tag }}"
-          VERSION="${TAG#reuniao-v}"
           PKG=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/reuniao/__init__.py').read_text()).group(1))")
+
+          # A tag push names itself; a manual run is told the tag; a push to a
+          # publication branch cuts the tag from the version in the package.
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="reuniao-v$PKG"
+          fi
+          VERSION="${TAG#reuniao-v}"
+
           echo "Tag version: $VERSION / package version: $PKG"
           if [ "$VERSION" != "$PKG" ]; then
             echo "::error::Tag $TAG does not match reuniao.__version__ ($PKG). Bump the package version first."
             exit 1
           fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists; building the tagged commit."
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            git checkout --detach "refs/tags/$TAG"
+            EXISTS=true
+          else
+            echo "$TAG does not exist yet; it will be cut from $(git rev-parse --short HEAD)."
+            EXISTS=false
+          fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # Only once the tree is known to carry the matching version, so a failed
       # check never leaves a tag behind.
       - name: Create the tag
-        if: steps.ref.outputs.exists != 'true'
+        if: steps.version.outputs.exists != 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

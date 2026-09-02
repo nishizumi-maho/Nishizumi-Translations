@@ -179,6 +179,15 @@ Publicar uma versão nova:
 git tag reuniao-v0.2.0 && git push origin reuniao-v0.2.0
 ```
 
-O workflow confere se a tag bate com a versão do pacote, monta os pacotes de
-Windows e Linux e cria um release **rascunho e pré-lançamento** — visível só
-para quem tem acesso de escrita ao repositório.
+Quando criar tags não for possível (token restrito, proteção de repositório),
+empurre uma branch de publicação em vez disso — o workflow cria a tag a partir
+da versão do pacote:
+
+```bash
+git push origin HEAD:refs/heads/publicar/reuniao-v0.2.0
+```
+
+De qualquer um dos dois jeitos, o workflow confere se a tag bate com a versão
+do pacote, monta os pacotes de Windows e Linux e cria um release **rascunho e
+pré-lançamento** — visível só para quem tem acesso de escrita ao repositório.
+Se a tag já existir, é o commit dela que é empacotado.
