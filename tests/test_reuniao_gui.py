@@ -71,9 +71,9 @@ def test_the_speaker_fields_follow_the_checkbox(monkeypatch, tmp_path):
     page = TranscribePage()
 
     page.speakers_check.setChecked(False)
-    assert not page.people_spin.isEnabled()
+    assert not page.separation_combo.isEnabled()
     assert not page.names_edit.isEnabled()
 
     page.speakers_check.setChecked(True)
-    assert page.people_spin.isEnabled()
+    assert page.separation_combo.isEnabled()
     assert page.names_edit.isEnabled()

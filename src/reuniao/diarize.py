@@ -18,6 +18,16 @@ from .progress import ProgressEvent, stage_percent
 #: Catalog key of the pack this module loads.
 COMPONENT_KEY = "diarize:sherpa-cam++"
 
+#: How close two stretches of speech have to sound to be counted as one person.
+#: Higher merges similar voices, lower splits them.
+DEFAULT_THRESHOLD = 0.5
+#: The choices the UI offers, phrased by the symptom they fix.
+THRESHOLD_CHOICES: tuple[tuple[str, float], ...] = (
+    ("Automática", DEFAULT_THRESHOLD),
+    ("Separar mais (vozes parecidas viraram uma só)", 0.35),
+    ("Juntar mais (uma pessoa virou duas)", 0.7),
+)
+
 
 class DiarizationUnavailable(RuntimeError):
     """The models or the sherpa-onnx runtime are missing.
@@ -75,16 +85,15 @@ def model_paths() -> tuple[Path, Path]:
 def diarize(
     samples,
     *,
-    speaker_count: int = 0,
-    threshold: float = 0.5,
+    threshold: float = DEFAULT_THRESHOLD,
     threads: int = 0,
     on_progress: Callable[[ProgressEvent], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> list[SpeakerSpan]:
     """Split 16 kHz mono *samples* into per-voice spans.
 
-    ``speaker_count`` of 0 lets the clustering decide how many people are in
-    the room; anything higher pins it, which is worth setting when you know.
+    How many people are in the room is worked out from *threshold* rather than
+    stated up front: raise it and similar voices merge, lower it and they split.
     """
 
     try:
@@ -103,8 +112,15 @@ def diarize(
         embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=str(embedding), num_threads=threads or 2
         ),
+        # num_clusters is deliberately left at -1, which is what makes the
+        # threshold the deciding knob. Pinning it to a known headcount reads
+        # like the better option and measures worse: on a two-voice recording
+        # that auto mode splits correctly, asking for 2 returns 1, and asking
+        # for 4 on a four-voice one returns 3, at any threshold. The threshold
+        # in auto mode behaves the way you would expect instead — on that same
+        # four-voice recording it walks 8 voices at 0.2 down to 4 at 0.6.
         clustering=sherpa_onnx.FastClusteringConfig(
-            num_clusters=int(speaker_count) if speaker_count and speaker_count > 0 else -1,
+            num_clusters=-1,
             threshold=float(threshold),
         ),
         min_duration_on=0.3,

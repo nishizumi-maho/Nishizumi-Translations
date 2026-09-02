@@ -188,7 +188,6 @@ class Runner:
         try:
             spans = diarize.diarize(
                 samples,
-                speaker_count=settings.speaker_count,
                 threshold=settings.clustering_threshold,
                 threads=settings.threads,
                 on_progress=self.on_progress,

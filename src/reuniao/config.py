@@ -58,11 +58,11 @@ class Settings:
     compute_type: str = ""
 
     identify_speakers: bool = True
-    #: 0 asks the clustering to work the number out on its own.
-    speaker_count: int = 0
     #: Real names, in the order each voice first speaks. Anything missing keeps
     #: the generic "Interlocutor N" label.
     speaker_names: list[str] = field(default_factory=list)
+    #: How readily two stretches of speech count as the same person. The number
+    #: of people is found from this rather than stated up front — see diarize.py.
     clustering_threshold: float = 0.5
 
     layout: str = "blocos"
@@ -94,7 +94,6 @@ class Settings:
         if self.device not in {"auto", "cuda", "cpu"}:
             self.device = "auto"
         self.beam_size = max(1, min(20, int(self.beam_size)))
-        self.speaker_count = max(0, min(50, int(self.speaker_count)))
         self.threads = max(0, min(128, int(self.threads)))
         self.clustering_threshold = max(0.1, min(1.5, float(self.clustering_threshold)))
         self.merge_gap = max(0.0, min(10.0, float(self.merge_gap)))

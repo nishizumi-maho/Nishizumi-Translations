@@ -34,8 +34,12 @@ def transcribe_command(
     interlocutores: bool = typer.Option(
         True, "--interlocutores/--sem-interlocutores", help="Identificar quem falou cada trecho."
     ),
-    pessoas: int = typer.Option(0, "--pessoas", "-p", help="Número de pessoas na reunião. 0 = automático."),
     nomes: str = typer.Option("", "--nomes", "-n", help='Nomes na ordem de fala: "Ana,João,Carla".'),
+    separacao: float = typer.Option(
+        0.0,
+        "--separacao",
+        help="Separação das vozes, de 0.1 a 1.5. Menor separa mais, maior junta mais. 0 = usar o salvo.",
+    ),
     formato: str = typer.Option("blocos", "--formato", "-f", help="Layout do .txt: blocos ou linhas."),
     srt: bool = typer.Option(False, "--srt", help="Também salvar legenda .srt."),
     vtt: bool = typer.Option(False, "--vtt", help="Também salvar legenda .vtt."),
@@ -51,7 +55,8 @@ def transcribe_command(
     settings.model = modelo or settings.model
     settings.device = dispositivo
     settings.identify_speakers = interlocutores
-    settings.speaker_count = pessoas
+    if separacao:
+        settings.clustering_threshold = separacao
     settings.layout = formato
     settings.also_srt = srt
     settings.also_vtt = vtt

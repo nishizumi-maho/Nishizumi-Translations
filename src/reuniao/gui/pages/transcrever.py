@@ -14,7 +14,7 @@ from ...config import (
     parse_speaker_names,
     save_settings,
 )
-from ...diarize import unavailable_reason
+from ...diarize import DEFAULT_THRESHOLD, THRESHOLD_CHOICES, unavailable_reason
 from ...media import is_media
 from ...pipeline import Job, Result
 from ...progress import ProgressEvent
@@ -106,11 +106,17 @@ class TranscribePage(ScrollPage):
         self.speakers_check.toggled.connect(self._on_speakers_toggled)
         form.addRow("Interlocutores", self.speakers_check)
 
-        self.people_spin = QtWidgets.QSpinBox()
-        self.people_spin.setRange(0, 50)
-        self.people_spin.setSpecialValueText("Descobrir sozinho")
-        self.people_spin.setSuffix(" pessoas")
-        form.addRow("Quantas pessoas", self.people_spin)
+        # The number of people is found from how readily two stretches of
+        # speech count as one voice, not stated up front — see diarize.py for
+        # why pinning a headcount measures worse than it sounds.
+        self.separation_combo = QtWidgets.QComboBox()
+        for text, value in THRESHOLD_CHOICES:
+            self.separation_combo.addItem(text, value)
+        self.separation_combo.setToolTip(
+            "Mude só se o resultado sair errado: se duas pessoas viraram uma, "
+            "separe mais; se uma pessoa virou duas, junte mais."
+        )
+        form.addRow("Separação de vozes", self.separation_combo)
 
         self.names_edit = QtWidgets.QLineEdit()
         self.names_edit.setPlaceholderText("Ana, João, Carla — na ordem em que falam pela primeira vez")
@@ -184,15 +190,6 @@ class TranscribePage(ScrollPage):
             self.compute_combo.addItem(value, value)
         form.addRow("Precisão", self.compute_combo)
 
-        self.threshold_spin = QtWidgets.QDoubleSpinBox()
-        self.threshold_spin.setRange(0.1, 1.5)
-        self.threshold_spin.setSingleStep(0.05)
-        self.threshold_spin.setToolTip(
-            "Menor separa mais vozes; maior junta vozes parecidas. Só vale com "
-            "'Descobrir sozinho' em Quantas pessoas."
-        )
-        form.addRow("Sensibilidade das vozes", self.threshold_spin)
-
         self.gap_spin = QtWidgets.QDoubleSpinBox()
         self.gap_spin.setRange(0.0, 10.0)
         self.gap_spin.setSingleStep(0.2)
@@ -264,7 +261,8 @@ class TranscribePage(ScrollPage):
     def _load_settings_into_form(self) -> None:
         settings = self.settings
         self.speakers_check.setChecked(settings.identify_speakers)
-        self.people_spin.setValue(settings.speaker_count)
+        index = self.separation_combo.findData(settings.clustering_threshold)
+        self.separation_combo.setCurrentIndex(index if index >= 0 else 0)
         self.names_edit.setText(", ".join(settings.speaker_names))
         self.layout_combo.setCurrentIndex(max(0, self.layout_combo.findData(settings.layout)))
         self.srt_check.setChecked(settings.also_srt)
@@ -277,7 +275,6 @@ class TranscribePage(ScrollPage):
         self.repetition_check.setChecked(settings.avoid_repetition)
         self.threads_spin.setValue(settings.threads)
         self.compute_combo.setCurrentIndex(max(0, self.compute_combo.findData(settings.compute_type)))
-        self.threshold_spin.setValue(settings.clustering_threshold)
         self.gap_spin.setValue(settings.merge_gap)
         if settings.initial_prompt and settings.initial_prompt != DEFAULT_PROMPT:
             self.prompt_edit.setPlainText(settings.initial_prompt)
@@ -287,7 +284,7 @@ class TranscribePage(ScrollPage):
         settings = self.settings
         settings.model = self.model_combo.currentData() or ""
         settings.identify_speakers = self.speakers_check.isChecked()
-        settings.speaker_count = self.people_spin.value()
+        settings.clustering_threshold = self.separation_combo.currentData() or DEFAULT_THRESHOLD
         settings.speaker_names = parse_speaker_names(self.names_edit.text())
         settings.layout = self.layout_combo.currentData() or "blocos"
         settings.also_srt = self.srt_check.isChecked()
@@ -300,7 +297,6 @@ class TranscribePage(ScrollPage):
         settings.avoid_repetition = self.repetition_check.isChecked()
         settings.threads = self.threads_spin.value()
         settings.compute_type = self.compute_combo.currentData() or ""
-        settings.clustering_threshold = self.threshold_spin.value()
         settings.merge_gap = self.gap_spin.value()
         settings.initial_prompt = self.prompt_edit.toPlainText().strip() or DEFAULT_PROMPT
         settings.normalize()
@@ -349,9 +345,8 @@ class TranscribePage(ScrollPage):
         self.banner.setVisible(False)
 
     def _on_speakers_toggled(self, checked: bool) -> None:
-        self.people_spin.setEnabled(checked)
+        self.separation_combo.setEnabled(checked)
         self.names_edit.setEnabled(checked)
-        self.threshold_spin.setEnabled(checked)
         self._refresh_banner()
 
     def _on_model_activated(self, index: int) -> None:

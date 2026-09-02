@@ -15,7 +15,7 @@ def test_defaults_are_meeting_shaped():
 
     assert settings.identify_speakers is True
     assert settings.layout == "blocos"
-    assert settings.speaker_count == 0  # work it out automatically
+    assert settings.clustering_threshold == 0.5  # voices are counted, not declared
     assert settings.avoid_repetition is True
     assert "português do Brasil" in DEFAULT_PROMPT
 
@@ -26,7 +26,6 @@ def test_out_of_range_and_unknown_values_are_pulled_back():
             "layout": "sei-la",
             "device": "tpu",
             "beam_size": 999,
-            "speaker_count": -4,
             "clustering_threshold": 9.0,
             "speaker_names": ["Ana", "  ", "João"],
             "campo_que_nao_existe": True,
@@ -36,7 +35,6 @@ def test_out_of_range_and_unknown_values_are_pulled_back():
     assert settings.layout == "blocos"
     assert settings.device == "auto"
     assert settings.beam_size == 20
-    assert settings.speaker_count == 0
     assert settings.clustering_threshold == 1.5
     assert settings.speaker_names == ["Ana", "João"]
 

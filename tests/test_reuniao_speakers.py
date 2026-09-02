@@ -101,3 +101,55 @@ def test_voices_are_renumbered_in_order_of_first_speech():
     result = renumber(spans)
 
     assert [(item.start, item.speaker) for item in result] == [(0, 0), (2, 1), (4, 0), (9, 2)]
+
+
+def test_the_diarizer_never_pins_a_headcount(monkeypatch):
+    """Regression guard for a measured upstream quirk.
+
+    Handing sherpa-onnx a known number of speakers reads like the better
+    option and measures worse: on a two-voice recording that auto mode splits
+    correctly, asking for 2 comes back with 1. The threshold is what decides,
+    so ``num_clusters`` has to stay at -1.
+    """
+
+    import sys
+    import types
+
+    captured = {}
+
+    class Config:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def validate(self):
+            return True
+
+    class Clustering:
+        def __init__(self, num_clusters, threshold):
+            captured["num_clusters"] = num_clusters
+            captured["threshold"] = threshold
+
+    class Engine:
+        def __init__(self, _config):
+            pass
+
+        def process(self, _samples, callback=None):
+            return types.SimpleNamespace(sort_by_start_time=lambda: [])
+
+    fake = types.SimpleNamespace(
+        OfflineSpeakerDiarizationConfig=Config,
+        OfflineSpeakerSegmentationModelConfig=lambda **kw: kw,
+        OfflineSpeakerSegmentationPyannoteModelConfig=lambda **kw: kw,
+        SpeakerEmbeddingExtractorConfig=lambda **kw: kw,
+        FastClusteringConfig=Clustering,
+        OfflineSpeakerDiarization=Engine,
+    )
+    monkeypatch.setitem(sys.modules, "sherpa_onnx", fake)
+
+    from reuniao import diarize
+
+    monkeypatch.setattr(diarize, "model_paths", lambda: ("seg.onnx", "emb.onnx"))
+
+    assert diarize.diarize([0.0], threshold=0.7) == []
+    assert captured["num_clusters"] == -1
+    assert captured["threshold"] == 0.7

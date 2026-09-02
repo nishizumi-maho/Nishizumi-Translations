@@ -89,17 +89,24 @@ fala e marca onde a voz muda; o outro transforma cada trecho em uma
 "impressão digital" de voz. Trechos com impressões parecidas viram a mesma
 pessoa. É automático e independe do idioma.
 
-Duas coisas ajudam bastante:
+O número de participantes é descoberto sozinho — você não informa quantos
+são. Isso é de propósito: o motor aceita um número fixo de vozes, mas medindo
+o resultado ele erra mais assim do que no automático (numa gravação de duas
+pessoas que o automático separa certo, pedir "2" devolve 1).
 
-- **Quantas pessoas**: se você sabe que a reunião tinha 4 participantes,
-  informe. É mais confiável que deixar o programa adivinhar.
-- **Nomes**: preencha `Ana, João, Carla` na ordem em que cada um fala pela
-  primeira vez, e o texto sai com os nomes no lugar de "Interlocutor 1".
+O que você regula é a **Separação de vozes**, e só quando o resultado sair
+errado:
+
+- **Separar mais** — duas pessoas viraram uma só.
+- **Juntar mais** — uma pessoa virou duas.
+
+Preencha também o campo **Nomes** com `Ana, João, Carla` na ordem em que cada
+um fala pela primeira vez, e o texto sai com os nomes no lugar de
+"Interlocutor 1".
 
 O programa **não reconhece pessoas**: ele só distingue vozes dentro daquela
 gravação. Vozes muito parecidas, muita conversa cruzada ou um microfone
-distante atrapalham. Em **Ajustes avançados**, a *Sensibilidade das vozes*
-regula isso: valores menores separam mais, valores maiores juntam mais.
+distante atrapalham.
 
 Sem o pacote instalado, a transcrição sai normalmente — só sem os nomes, com os
 horários de sempre.
@@ -108,7 +115,7 @@ horários de sempre.
 
 ```bash
 reuniao transcrever reuniao.m4a
-reuniao transcrever reuniao.m4a --pessoas 4 --nomes "Ana,João,Carla,Beto"
+reuniao transcrever reuniao.m4a --nomes "Ana,João,Carla,Beto"
 reuniao transcrever *.mp3 --saida ~/transcricoes --srt --formato linhas
 reuniao componentes            # o que já está instalado
 reuniao instalar model:medium  # baixa um componente pela chave
@@ -119,8 +126,8 @@ Opções úteis do `transcrever`:
 
 | Opção | Para quê |
 | --- | --- |
-| `--pessoas N` | Fixa o número de participantes. `0` = descobrir sozinho. |
 | `--nomes "Ana,João"` | Nomes na ordem da primeira fala. |
+| `--separacao 0.35` | Separa mais as vozes. Acima de 0.5 junta mais. |
 | `--formato linhas` | Uma linha por fala, bom para `grep` e comparação. |
 | `--srt` `--vtt` `--json` | Formatos extras além do `.txt`. |
 | `--dispositivo cpu` | Força o processador quando a GPU dá problema. |
