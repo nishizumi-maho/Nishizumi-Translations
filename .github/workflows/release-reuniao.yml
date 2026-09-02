@@ -1,0 +1,303 @@
+name: Release Reuniões (experimental)
+
+# Publishes the experimental meeting transcriber as a hidden pre-release: the
+# GitHub release is created as a draft and marked as a pre-release, so it never
+# shows up as "Latest" and nobody stumbles onto it from the releases page.
+#
+# Two ways in:
+#   * push a tag such as reuniao-v0.1.0
+#   * run it by hand once this workflow reaches the default branch
+#
+# The subtitle app has its own release.yml and is untouched by this one.
+
+on:
+  push:
+    tags:
+      - "reuniao-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and publish (for example reuniao-v0.1.0). Created when it does not exist yet."
+        required: true
+        type: string
+      source:
+        description: "Branch or commit the tag is cut from, when the tag does not exist yet."
+        required: false
+        default: "claude/whisper-audio-transcription-owuwfs"
+        type: string
+      draft:
+        description: "Keep the release hidden as a draft."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  BUNDLE_NAME: NishizumiReunioes
+
+jobs:
+  resolve:
+    name: Resolve tag and version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A tag push builds that tag; a manual run starts from the branch, so
+          # the tag can be cut here when it does not exist yet.
+          ref: ${{ inputs.source || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the ref
+        id: ref
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          EXISTS=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "$TAG already exists; building the tagged commit."
+              git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+              git checkout --detach "refs/tags/$TAG"
+            else
+              echo "$TAG does not exist yet; it will be cut from $(git rev-parse --short HEAD) after the version check."
+              EXISTS=false
+            fi
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "exists=$EXISTS" >> "$GITHUB_OUTPUT"
+
+      - name: Check the version matches the tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ref.outputs.tag }}"
+          VERSION="${TAG#reuniao-v}"
+          PKG=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('src/reuniao/__init__.py').read_text()).group(1))")
+          echo "Tag version: $VERSION / package version: $PKG"
+          if [ "$VERSION" != "$PKG" ]; then
+            echo "::error::Tag $TAG does not match reuniao.__version__ ($PKG). Bump the package version first."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Only once the tree is known to carry the matching version, so a failed
+      # check never leaves a tag behind.
+      - name: Create the tag
+        if: steps.ref.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Nishizumi Reunioes ${{ steps.version.outputs.version }} (experimental)"
+          git push origin "refs/tags/${{ steps.version.outputs.tag }}"
+
+  windows:
+    name: Windows installer
+    needs: resolve
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ".[gui,asr,interlocutores]"
+
+      - name: Build application bundle
+        run: python build_reuniao.py --mode onedir --clean
+
+      - name: Ensure Inno Setup is available
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup not present on the runner; installing via Chocolatey."
+            choco install innosetup -y --no-progress
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          & "$env:ISCC" "/DMyAppVersion=${{ needs.resolve.outputs.version }}" installer\reuniao.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\installer\*.exe | Select-Object -First 1
+          if (-not $setup) { throw "No installer was produced" }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($setup.Name)" | Out-File -FilePath "dist\installer\$($setup.Name).sha256" -Encoding ascii
+          Write-Host "$($setup.Name): $hash ($([math]::Round($setup.Length/1MB,1)) MB)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reunioes-windows
+          path: dist/installer/*
+          retention-days: 14
+
+  linux:
+    name: Linux bundle
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 \
+            libxcb-cursor0
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ".[gui,asr,interlocutores]"
+
+      - name: Build application bundle
+        run: python build_reuniao.py --mode onedir --clean
+
+      - name: Package and checksum
+        run: |
+          set -euo pipefail
+          NAME="Nishizumi-Reunioes-${{ needs.resolve.outputs.version }}-linux-x64.tar.gz"
+          mkdir -p dist/release
+          tar -czf "dist/release/$NAME" -C dist "$BUNDLE_NAME"
+          cd dist/release
+          sha256sum "$NAME" > "$NAME.sha256"
+          ls -lh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reunioes-linux
+          path: dist/release/*
+          retention-days: 14
+
+  publish:
+    name: Publish the hidden pre-release
+    needs: [resolve, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect the files
+        id: files
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          find artifacts -type f -exec cp {} upload/ \;
+          ls -lh upload
+          echo "count=$(ls upload | wc -l)" >> "$GITHUB_OUTPUT"
+
+      - name: Write the release notes
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Nishizumi Reuniões — versão experimental
+
+          Transcrição de reuniões em **português do Brasil**: horários de fala,
+          o que foi dito e, quando o pacote de vozes está instalado, quem falou
+          cada trecho. A saída é um `.txt` em estilo legenda (opcionalmente
+          também `.srt`, `.vtt` e `.json`).
+
+          Tudo roda no seu computador — o áudio não sai da máquina.
+
+          ### O que baixar
+
+          | Sistema | Arquivo |
+          | --- | --- |
+          | Windows | `Nishizumi-Reunioes-Setup-<versão>.exe` |
+          | Linux | `Nishizumi-Reunioes-<versão>-linux-x64.tar.gz` |
+
+          ### Primeiro uso
+
+          1. Instale e abra o aplicativo.
+          2. Vá em **Componentes** e baixe o FFmpeg, um modelo de transcrição
+             (o *Large v3 Turbo* é o recomendado) e a **Identificação de
+             interlocutores**.
+          3. Volte em **Transcrever**, arraste a gravação e clique em
+             **Transcrever**.
+
+          Os modelos são compartilhados com o Nishizumi Translations: se você já
+          usa o outro aplicativo, o que estiver baixado é reaproveitado.
+
+          ### Avisos
+
+          - Build **experimental**, publicado como rascunho e pré-lançamento.
+            Não é atualizado automaticamente e não substitui o Nishizumi
+            Translations.
+          - Sem GPU NVIDIA, uma reunião longa com o modelo grande pode levar
+            horas. O *Large v3 Turbo* é bem mais rápido.
+          - A identificação de interlocutores é automática: ela separa as vozes,
+            mas não sabe os nomes. Preencha o campo **Nomes** para trocar
+            "Interlocutor 1" pelo nome real.
+          NOTES
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve.outputs.tag }}"
+          VERSION="${{ needs.resolve.outputs.version }}"
+          # Hidden by default: a draft release is visible only to people who can
+          # write to the repository. "--draft=false" on a manual run publishes it.
+          DRAFT_FLAG="--draft"
+          if [ "${{ inputs.draft }}" = "false" ]; then
+            DRAFT_FLAG=""
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Updating the existing release $TAG"
+            gh release upload "$TAG" upload/* --clobber
+            gh release edit "$TAG" --prerelease --notes-file notes.md \
+              --title "Nishizumi Reuniões $VERSION (experimental)"
+          else
+            echo "Creating release $TAG"
+            gh release create "$TAG" upload/* \
+              --title "Nishizumi Reuniões $VERSION (experimental)" \
+              --notes-file notes.md \
+              --prerelease $DRAFT_FLAG
+          fi
+          gh release view "$TAG" --json name,isDraft,isPrerelease,assets \
+            --jq '{name, isDraft, isPrerelease, assets: [.assets[].name]}'

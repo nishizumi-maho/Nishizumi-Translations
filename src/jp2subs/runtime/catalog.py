@@ -16,6 +16,8 @@ class ComponentKind(str, Enum):
     TRANSLATION = "translation"
     TOOL = "tool"
     ACCELERATION = "acceleration"
+    #: ONNX models for speaker diarization, used by the meeting variant.
+    DIARIZATION = "diarization"
 
 
 class ModelFamily(str, Enum):
@@ -41,6 +43,8 @@ class Component:
     family: ModelFamily = ModelFamily.GENERAL
     #: Direct download used by tools that are not fetched from Hugging Face.
     url: str = ""
+    #: Several direct downloads that install into one folder (archives are unpacked).
+    urls: tuple[str, ...] = ()
     #: PyPI distributions bundled into an acceleration pack.
     wheels: tuple[tuple[str, str], ...] = ()
     #: Whisper model alias understood by faster-whisper (``large-v3`` etc).
@@ -277,6 +281,38 @@ _CUDA_PACK = Component(
 )
 
 
+# --- Speaker diarization --------------------------------------------------
+# Used by the meeting transcriber to tell one voice from another. Both files
+# are plain ONNX graphs served by the sherpa-onnx release pages, so they need
+# no account, no token and no extra model format.
+
+_DIARIZATION_PACK = Component(
+    key="diarize:sherpa-cam++",
+    name="Speaker identification",
+    kind=ComponentKind.DIARIZATION,
+    summary="Splits a recording by voice, so each line of the transcript can be attributed to a speaker.",
+    approx_size=37 * MB,
+    urls=(
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/"
+        "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/"
+        "wespeaker_en_voxceleb_CAM%2B%2B.onnx",
+    ),
+    recommended=True,
+    notes="Voice segmentation (pyannote 3.0) plus a CAM++ voice fingerprint. Language independent.",
+)
+
+
+def diarization_components() -> tuple[Component, ...]:
+    """Speaker identification packs.
+
+    Deliberately absent from :func:`all_components`: only the meeting variant
+    offers them, so the subtitle app's Components page stays as it was.
+    """
+
+    return (_DIARIZATION_PACK,)
+
+
 def is_windows() -> bool:
     return sys.platform.startswith("win")
 
@@ -367,7 +403,9 @@ def all_components() -> tuple[Component, ...]:
 
 
 def component(key: str) -> Component | None:
-    for item in all_components():
+    """Look up any installable item, including ones no page lists by default."""
+
+    for item in (*all_components(), *diarization_components()):
         if item.key == key:
             return item
     return None

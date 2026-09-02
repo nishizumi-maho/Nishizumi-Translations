@@ -52,6 +52,10 @@ _SKIP_NAMES = {".gitattributes", ".gitignore"}
 _MODEL_MARKER = "config.json"
 _MODEL_WEIGHTS = "model.bin"
 
+#: Filenames a diarization pack is normalized to, whatever the archives called them.
+SEGMENTATION_MODEL = "segmentation.onnx"
+EMBEDDING_MODEL = "embedding.onnx"
+
 
 @dataclass
 class ComponentStatus:
@@ -188,6 +192,8 @@ class ComponentManager:
             return store.models_dir() / (item.model_alias or catalog.custom_slug(item.repo_id))
         if item.kind is ComponentKind.TRANSLATION:
             return store.models_dir() / "translation" / item.key.split(":", 1)[-1]
+        if item.kind is ComponentKind.DIARIZATION:
+            return store.models_dir() / "diarization" / item.key.split(":", 1)[-1]
         if item.key == "tool:ffmpeg":
             return store.tools_dir() / "ffmpeg"
         if item.kind is ComponentKind.ACCELERATION:
@@ -205,6 +211,8 @@ class ComponentManager:
             return (path / _MODEL_MARKER).exists() and (path / _MODEL_WEIGHTS).exists()
         if item.key == "tool:ffmpeg":
             return self._managed_ffmpeg() is not None
+        if item.kind is ComponentKind.DIARIZATION:
+            return (path / SEGMENTATION_MODEL).exists() and (path / EMBEDDING_MODEL).exists()
         if item.kind is ComponentKind.ACCELERATION:
             return path.exists() and any(path.rglob("*.dll"))
         return path.exists()
@@ -421,6 +429,8 @@ class ComponentManager:
                 version = self._install_ffmpeg(item, staging, on_progress, is_cancelled)
             elif item.kind is ComponentKind.ACCELERATION:
                 version = self._install_wheels(item, staging, on_progress, is_cancelled)
+            elif item.kind is ComponentKind.DIARIZATION:
+                version = self._install_diarization(item, staging, on_progress, is_cancelled)
             else:  # pragma: no cover - no other kinds today
                 raise ValueError(f"No installer for component kind {item.kind}")
         except DownloadCancelled:
@@ -543,6 +553,58 @@ class ComponentManager:
         _prune_ffmpeg(staging)
         return _ffmpeg_version(binary)
 
+    def _install_diarization(
+        self,
+        item: Component,
+        staging: Path,
+        on_progress: ProgressCallback | None,
+        is_cancelled: CancelCheck | None,
+    ) -> str:
+        """Fetch the two ONNX graphs a diarization pack needs.
+
+        Each entry is either a bare ``.onnx`` file or an archive holding one.
+        Both end up under fixed names, so callers never have to know which
+        upstream project laid the folder out.
+        """
+
+        downloads = staging / "_download"
+        downloads.mkdir(parents=True, exist_ok=True)
+        urls = list(item.urls) or ([item.url] if item.url else [])
+        if not urls:
+            raise ValueError(f"{item.key} has no download URLs")
+
+        total = item.approx_size
+        done = 0
+        for index, url in enumerate(urls):
+            name = _url_filename(url) or f"part-{index}"
+            payload = downloads / name
+            download_file(
+                url,
+                payload,
+                label=f"{item.name} · {name}",
+                on_progress=on_progress,
+                is_cancelled=is_cancelled,
+                base_downloaded=done,
+                base_total=total,
+            )
+            done += payload.stat().st_size
+            if payload.suffix.lower() == ".onnx":
+                continue
+            _emit(on_progress, item.name, -1, f"Extracting {name}")
+            extract_archive(payload, downloads / f"unpacked-{index}", on_progress=on_progress, label=item.name)
+            payload.unlink(missing_ok=True)
+
+        segmentation = _pick_onnx(downloads, ("model.onnx", "segmentation.onnx"))
+        embedding = _pick_onnx(downloads, (), exclude={segmentation} if segmentation else set())
+        if not segmentation or not embedding:
+            raise RuntimeError(
+                f"{item.name} download did not contain both a segmentation and an embedding model."
+            )
+        shutil.move(str(segmentation), str(staging / SEGMENTATION_MODEL))
+        shutil.move(str(embedding), str(staging / EMBEDDING_MODEL))
+        shutil.rmtree(downloads, ignore_errors=True)
+        return item.key.split(":", 1)[-1]
+
     def _install_wheels(
         self,
         item: Component,
@@ -605,6 +667,34 @@ def _keep_model_file(name: str) -> bool:
     if any(lowered.endswith(suffix) for suffix in _SKIP_SUFFIXES):
         return False
     return True
+
+
+def _url_filename(url: str) -> str:
+    """Last path segment of a URL, with percent escapes decoded."""
+
+    from urllib.parse import unquote, urlparse
+
+    return Path(unquote(urlparse(url).path)).name
+
+
+def _pick_onnx(root: Path, preferred: Iterable[str], *, exclude: set[Path] | None = None) -> Path | None:
+    """Find one ONNX graph under *root*, favouring ``preferred`` filenames.
+
+    Quantised siblings (``model.int8.onnx``) are skipped: the packs ship them
+    next to the full model and they are the lower-accuracy option.
+    """
+
+    skip = exclude or set()
+    candidates = [
+        item
+        for item in sorted(root.rglob("*.onnx"))
+        if item not in skip and ".int8." not in item.name.lower()
+    ]
+    for name in preferred:
+        for item in candidates:
+            if item.name.lower() == name.lower():
+                return item
+    return candidates[0] if candidates else None
 
 
 def _archive_suffix(url: str) -> str:
