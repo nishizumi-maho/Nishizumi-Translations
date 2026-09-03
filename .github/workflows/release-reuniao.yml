@@ -7,7 +7,10 @@ name: Release Reuniões (experimental)
 # Three ways in:
 #   * push a tag such as reuniao-v0.1.0
 #   * push a branch such as publicar/reuniao-v0.1.0, for when tag creation is
-#     restricted: the tag is then cut here, from the version in the package
+#     restricted: the tag is then cut here, from the version in the package.
+#     Ending that branch name in -publico publishes the release instead of
+#     leaving it hidden, which is the one way to get a download link that can
+#     simply be clicked.
 #   * run it by hand once this workflow reaches the default branch
 #
 # When the tag already exists it is that commit that gets built, whichever way
@@ -290,20 +293,32 @@ jobs:
           set -euo pipefail
           TAG="${{ needs.resolve.outputs.tag }}"
           VERSION="${{ needs.resolve.outputs.version }}"
+
           # Hidden by default: a draft release is visible only to people who can
-          # write to the repository. "--draft=false" on a manual run publishes it.
-          DRAFT_FLAG="--draft"
-          if [ "${{ inputs.draft }}" = "false" ]; then
-            DRAFT_FLAG=""
-          fi
+          # write to the repository, and its files have no public URL at all —
+          # which is also what makes it awkward to actually download. A
+          # publication branch ending in -publico, or "draft: false" on a manual
+          # run, publishes it instead. Either way it stays a pre-release, so it
+          # never becomes the repository's "Latest".
+          HIDDEN=true
+          case "${{ github.ref_name }}" in
+            *-publico) HIDDEN=false ;;
+          esac
+          case "${{ inputs.draft }}" in
+            false) HIDDEN=false ;;
+            true) HIDDEN=true ;;
+          esac
+          echo "Release $TAG: prerelease, draft=$HIDDEN"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Updating the existing release $TAG"
             gh release upload "$TAG" upload/* --clobber
-            gh release edit "$TAG" --prerelease --notes-file notes.md \
+            gh release edit "$TAG" --prerelease --draft="$HIDDEN" --notes-file notes.md \
               --title "Nishizumi Reuniões $VERSION (experimental)"
           else
             echo "Creating release $TAG"
+            DRAFT_FLAG=""
+            if [ "$HIDDEN" = "true" ]; then DRAFT_FLAG="--draft"; fi
             gh release create "$TAG" upload/* \
               --title "Nishizumi Reuniões $VERSION (experimental)" \
               --notes-file notes.md \
