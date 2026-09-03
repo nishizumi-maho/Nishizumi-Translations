@@ -63,6 +63,11 @@ class Settings:
     vad: bool = True
     #: Even out the loudness before recognising, and cut the rumble.
     level_audio: bool = True
+    #: Also even it out *within* the recording, for a room where people sit at
+    #: very different distances from the microphone. Off by default: it lifts
+    #: the background along with the quiet voices, and lifted background is
+    #: what Whisper hallucinates over.
+    dynamic_level: bool = False
     #: Restarts Whisper's context each window, which stops runaway repetition
     #: on long recordings at the cost of a little cross-sentence context.
     avoid_repetition: bool = True

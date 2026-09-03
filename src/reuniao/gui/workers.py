@@ -195,3 +195,32 @@ def format_eta(seconds: float) -> str:
     if minutes:
         return f"{minutes} min {secs:02d} s"
     return f"{secs} s"
+
+
+class AnalysisSignals(QtCore.QObject):
+    #: (Measurement, Advice) for the recording examined.
+    finished = QtCore.Signal(object, object)
+    failed = QtCore.Signal(str)
+
+
+class AnalysisWorker(QtCore.QRunnable):
+    """Measures a recording without freezing the window.
+
+    A pass over two hours of audio is quick but not instant, and the window
+    has to stay alive while it happens.
+    """
+
+    def __init__(self, source: Path):
+        super().__init__()
+        self.source = source
+        self.signals = AnalysisSignals()
+
+    def run(self) -> None:  # pragma: no cover - runs on a worker thread
+        from ..analysis import report
+
+        try:
+            found, advice = report(self.source)
+        except Exception as exc:  # noqa: BLE001 - the dialog reports it
+            self.signals.failed.emit(str(exc))
+        else:
+            self.signals.finished.emit(found, advice)

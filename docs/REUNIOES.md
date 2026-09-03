@@ -116,11 +116,36 @@ usada depois para conferir a grafia. Nome próprio e sigla são o que o Whisper
 mais erra e o que uma ata mais precisa acertar. Sozinho, é o maior ganho
 disponível.
 
-**2. Equalizar o volume** (ligado por padrão). Numa sala com um gravador só,
-quem está longe do aparelho sai baixo — e volume baixo o Whisper erra bem mais
-que ruído. O preparo emparelha os volumes e corta o ronco de ar-condicionado e
-mesa. De propósito **não** há redução de ruído: o Whisper foi treinado com
-áudio ruidoso, e filtrar demais remove as pistas de que ele depende.
+**2. Trate o áudio — mas meça antes.** O botão **Analisar o áudio**, ao lado da
+fila, mede a gravação e diz o que ela precisa, em vez de você adivinhar:
+
+```
+Volume médio: -25,9 LUFS
+  Volume em faixa normal.
+Faixa dinâmica: 22,7 LU
+  Diferença grande entre as vozes altas e baixas — provavelmente há gente
+  longe do gravador.
+  Ligue o NIVELAMENTO DINÂMICO: é o caso que ele resolve.
+Pico: -0,9 dBTP
+```
+
+São dois tratamentos, e eles resolvem coisas diferentes:
+
+- **Equalizar o volume** (ligado por padrão) ajusta o volume do arquivo
+  inteiro e corta o ronco de ar-condicionado e mesa. Resolve gravação baixa.
+- **Nivelamento dinâmico** (desligado por padrão) ajusta trecho a trecho, e é
+  o que aproxima quem está do outro lado da mesa de quem está ao lado do
+  gravador. Numa gravação fabricada com uma pessoa 20 dB mais baixa, ele levou
+  a faixa dinâmica de 22,7 LU para 8,0 LU — enquanto a equalização simples
+  sozinha só chegou a 18,8. Fica desligado porque ele levanta o ruído de fundo
+  junto com as vozes baixas, e fundo alto é de onde saem as alucinações do
+  Whisper. Ligue quando a análise mandar.
+
+De propósito **não** há redução de ruído. O Whisper foi treinado com áudio
+ruidoso de verdade; denoiser introduz artefatos que ele nunca viu no treino e
+costuma piorar. Em português o dano é específico: o que esses filtros mais
+comem são as consoantes fracas (s, f, ch, x), que é onde se distingue plural e
+um monte de palavra parecida.
 
 **3. Uma faixa por participante**, quando der. Se a reunião for por Teams,
 Meet ou Zoom com gravação separada por pessoa, marque **Faixas** e coloque
@@ -219,6 +244,7 @@ glossário invalida o que estava guardado, porque o resultado mudaria.
 reuniao transcrever reuniao.m4a
 reuniao transcrever reuniao.m4a --nomes "Ana,João,Carla,Beto"
 reuniao transcrever *.mp3 --saida ~/transcricoes --srt --formato linhas
+reuniao analisar reuniao.m4a   # mede o áudio e diz o que ligar
 reuniao componentes            # o que já está instalado
 reuniao instalar model:medium  # baixa um componente pela chave
 reuniao config                 # mostra as preferências salvas
@@ -233,6 +259,7 @@ Opções úteis do `transcrever`:
 | `--glossario nomes.txt` | Nomes e siglas, de um arquivo ou separados por vírgula. |
 | `--faixas` | Os arquivos são faixas de uma reunião, uma por pessoa. |
 | `--sem-equalizar` | Não emparelhar o volume no preparo. |
+| `--nivelar` | Nivelamento dinâmico, para vozes a distâncias muito diferentes. |
 | `--sem-duvidas` | Não marcar `[?]` nos trechos de baixa confiança. |
 | `--sem-reaproveitar` | Ignorar a transcrição guardada e refazer. |
 | `--formato linhas` | Uma linha por fala, bom para `grep` e comparação. |
@@ -280,6 +307,7 @@ mostrarem os acentos corretamente no Windows.
 | `src/reuniao/cleanup.py` | Filtro de repetições e correção pelo glossário. |
 | `src/reuniao/cache.py` | Guarda o reconhecimento para não refazê-lo. |
 | `src/reuniao/review.py` | Lê uma transcrição de volta para a aba Revisar. |
+| `src/reuniao/analysis.py` | Mede a gravação e recomenda os tratamentos. |
 | `src/reuniao/gui/` | A janela. |
 | `build_reuniao.py` | Empacota com PyInstaller. |
 | `installer/reuniao.iss` | Instalador do Windows. |

@@ -47,6 +47,11 @@ def transcribe_command(
         help="Os arquivos são faixas de UMA reunião, uma por participante, e não reuniões separadas.",
     ),
     sem_equalizar: bool = typer.Option(False, "--sem-equalizar", help="Não emparelhar o volume antes de transcrever."),
+    nivelar: bool = typer.Option(
+        False,
+        "--nivelar",
+        help="Nivelamento dinâmico: aproxima quem está longe do gravador de quem está perto.",
+    ),
     sem_duvidas: bool = typer.Option(False, "--sem-duvidas", help="Não marcar com [?] os trechos de baixa confiança."),
     sem_reaproveitar: bool = typer.Option(False, "--sem-reaproveitar", help="Ignorar a transcrição guardada e refazer."),
     separacao: float = typer.Option(
@@ -82,6 +87,7 @@ def transcribe_command(
         settings.glossary = _read_glossary(glossario)
     settings.tracks_are_speakers = faixas
     settings.level_audio = not sem_equalizar
+    settings.dynamic_level = nivelar
     settings.mark_uncertain = not sem_duvidas
     settings.reuse_transcription = not sem_reaproveitar
     if beam:
@@ -133,6 +139,33 @@ def transcribe_command(
 
     if failures:
         raise typer.Exit(code=1)
+
+
+@app.command("analisar")
+def analyse_command(
+    arquivo: list[Path] = typer.Argument(..., help="Gravação a medir."),
+) -> None:
+    """Mede a gravação e diz quais ajustes de áudio valem a pena."""
+
+    from .analysis import report
+    from .media import MediaError
+
+    for item in arquivo:
+        console.rule(f"[bold]{item.name}")
+        try:
+            _found, advice = report(item)
+        except MediaError as exc:
+            console.print(f"[red]{exc}")
+            continue
+        for line in advice.lines:
+            console.print(line)
+        console.print()
+        flags = []
+        if advice.recommend_dynamic:
+            flags.append("marque o nivelamento dinâmico")
+        console.print(
+            "[green]Sugestão:[/green] " + (", ".join(flags) if flags else "os ajustes padrão servem.")
+        )
 
 
 @app.command("componentes")

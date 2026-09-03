@@ -73,12 +73,22 @@ def probe_duration(path: str | Path) -> float:
 #: aggressive denoising strips the cues it relies on.
 LEVEL_FILTER = "highpass=f=80,loudnorm=I=-16:TP=-1.5:LRA=11"
 
+#: Levelling within the recording rather than across it, for the meeting where
+#: one person sits beside the recorder and another across the table. Applied
+#: before loudnorm, so the final gain lands on already-evened audio.
+#:
+#: The gain ceiling is the important number here. Raising quiet passages also
+#: raises the room tone between them, and amplified silence is where Whisper
+#: invents things — so five is as far as it goes, rather than the default ten.
+DYNAMIC_FILTER = "dynaudnorm=f=250:g=15:p=0.9:m=5"
+
 
 def prepare_audio(
     source: str | Path,
     workdir: str | Path,
     *,
     level: bool = True,
+    dynamic: bool = False,
     register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> Path:
     """Decode *source* to a 16 kHz mono WAV inside *workdir* and return it."""
@@ -102,8 +112,13 @@ def prepare_audio(
         "-ar",
         str(SAMPLE_RATE),
     ]
+    filters = []
+    if dynamic:
+        filters.append(DYNAMIC_FILTER)
     if level:
-        command += ["-af", LEVEL_FILTER]
+        filters.append(LEVEL_FILTER)
+    if filters:
+        command += ["-af", ",".join(filters)]
     command += ["-c:a", "pcm_s16le", str(target)]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if register_subprocess:

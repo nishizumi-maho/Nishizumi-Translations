@@ -129,7 +129,11 @@ class Runner:
             )
             duration = max(duration, media.probe_duration(source))
             audio_path = media.prepare_audio(
-                source, output_dir, level=settings.level_audio, register_subprocess=self._register
+                source,
+                output_dir,
+                level=settings.level_audio,
+                dynamic=settings.dynamic_level,
+                register_subprocess=self._register,
             )
             try:
                 segments = self._transcribe(source, audio_path, model, settings, duration)
@@ -191,7 +195,11 @@ class Runner:
         self._emit("Preparar", 0.0, "Preparando o áudio...", source.name)
         duration = media.probe_duration(source)
         audio_path = media.prepare_audio(
-            source, output_dir, level=settings.level_audio, register_subprocess=self._register
+            source,
+            output_dir,
+            level=settings.level_audio,
+            dynamic=settings.dynamic_level,
+            register_subprocess=self._register,
         )
         self._check()
         self._log(f"Áudio preparado: {audio_path.name} ({16} kHz mono)")

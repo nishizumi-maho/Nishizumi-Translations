@@ -50,6 +50,12 @@ def key_for(source: Path, settings) -> str:
             settings.avoid_repetition,
             settings.initial_prompt,
             ",".join(settings.glossary),
+            # What the recogniser is fed matters as much as how it is asked.
+            # Levelling changes the audio itself, and the quantisation changes
+            # the arithmetic, so both change the transcription they produce.
+            settings.level_audio,
+            settings.dynamic_level,
+            settings.compute_type,
         )
     )
     return hashlib.sha1(shaped.encode("utf-8")).hexdigest()

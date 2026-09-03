@@ -20,7 +20,7 @@ from ...media import is_media
 from ...pipeline import Job, Result, TrackJob
 from ...progress import ProgressEvent
 from ..widgets import DropZone, browse_recordings, open_file, open_folder
-from ..workers import TranscriptionWorker
+from ..workers import AnalysisWorker, TranscriptionWorker
 
 
 class TranscribePage(ScrollPage):
@@ -84,8 +84,15 @@ class TranscribePage(ScrollPage):
         remove.clicked.connect(self._remove_selected)
         clear = QtWidgets.QPushButton("Limpar lista")
         clear.clicked.connect(self._clear_queue)
+        self.analyse_btn = QtWidgets.QPushButton("Analisar o áudio")
+        self.analyse_btn.setToolTip(
+            "Mede a gravação e diz quais ajustes de áudio valem a pena para ela, "
+            "antes de gastar uma hora transcrevendo."
+        )
+        self.analyse_btn.clicked.connect(self._analyse)
         row.addWidget(remove)
         row.addWidget(clear)
+        row.addWidget(self.analyse_btn)
         row.addStretch(1)
         card.body.addWidget(self.queue_buttons)
         self._sync_queue_visibility()
@@ -228,6 +235,16 @@ class TranscribePage(ScrollPage):
         )
         form.addRow("Áudio", self.level_check)
 
+        self.dynamic_check = QtWidgets.QCheckBox(
+            "Nivelamento dinâmico (quem está longe do gravador)"
+        )
+        self.dynamic_check.setToolTip(
+            "Aproxima o volume das vozes distantes das próximas, trecho a trecho. "
+            "Use “Analisar o áudio” para saber se esta gravação precisa: ele também "
+            "levanta o ruído de fundo junto, e fundo alto alimenta alucinação."
+        )
+        form.addRow("", self.dynamic_check)
+
         self.uncertain_check = QtWidgets.QCheckBox("Marcar com [?] o que saiu duvidoso")
         form.addRow("Dúvidas", self.uncertain_check)
 
@@ -326,6 +343,7 @@ class TranscribePage(ScrollPage):
         self.compute_combo.setCurrentIndex(max(0, self.compute_combo.findData(settings.compute_type)))
         self.gap_spin.setValue(settings.merge_gap)
         self.level_check.setChecked(settings.level_audio)
+        self.dynamic_check.setChecked(settings.dynamic_level)
         self.uncertain_check.setChecked(settings.mark_uncertain)
         self.repetition_filter_check.setChecked(settings.filter_repetitions)
         self.reuse_check.setChecked(settings.reuse_transcription)
@@ -355,6 +373,7 @@ class TranscribePage(ScrollPage):
         settings.compute_type = self.compute_combo.currentData() or ""
         settings.merge_gap = self.gap_spin.value()
         settings.level_audio = self.level_check.isChecked()
+        settings.dynamic_level = self.dynamic_check.isChecked()
         settings.mark_uncertain = self.uncertain_check.isChecked()
         settings.filter_repetitions = self.repetition_filter_check.isChecked()
         settings.reuse_transcription = self.reuse_check.isChecked()
@@ -453,6 +472,47 @@ class TranscribePage(ScrollPage):
         has_items = self.queue.count() > 0
         self.queue.setVisible(has_items)
         self.queue_buttons.setVisible(has_items)
+
+    def _analyse(self) -> None:
+        """Measure the first queued recording and say what it needs."""
+
+        paths = self.queue.paths()
+        if not paths:
+            QtWidgets.QMessageBox.information(
+                self, "Nenhuma gravação", "Arraste o arquivo da reunião para analisar."
+            )
+            return
+
+        self.analyse_btn.setEnabled(False)
+        self.analyse_btn.setText("Analisando...")
+        worker = AnalysisWorker(paths[0])
+        worker.signals.finished.connect(self._on_analysis)
+        worker.signals.failed.connect(self._on_analysis_failed)
+        QtCore.QThreadPool.globalInstance().start(worker)
+
+    @QtCore.Slot(object, object)
+    def _on_analysis(self, _found, advice) -> None:
+        self._reset_analyse_button()
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Análise da gravação")
+        box.setIcon(QtWidgets.QMessageBox.Information)
+        box.setText("\n".join(advice.lines))
+        if advice.recommend_dynamic and not self.dynamic_check.isChecked():
+            box.setInformativeText("Quer ligar o nivelamento dinâmico agora?")
+            box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            box.setDefaultButton(QtWidgets.QMessageBox.Yes)
+            if box.exec() == QtWidgets.QMessageBox.Yes:
+                self.dynamic_check.setChecked(True)
+            return
+        box.exec()
+
+    def _on_analysis_failed(self, message: str) -> None:
+        self._reset_analyse_button()
+        QtWidgets.QMessageBox.warning(self, "Não deu para analisar", message)
+
+    def _reset_analyse_button(self) -> None:
+        self.analyse_btn.setEnabled(True)
+        self.analyse_btn.setText("Analisar o áudio")
 
     def _remove_selected(self) -> None:
         for item in self.queue.selectedItems():

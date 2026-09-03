@@ -46,6 +46,10 @@ def test_changing_a_setting_that_changes_the_result_invalidates_it(tmp_path, mon
         ("vad", False),
         ("initial_prompt", "outro contexto"),
         ("glossary", ["Acme"]),
+        # Levelling changes the audio the recogniser hears, so it has to
+        # invalidate too — otherwise turning it on serves the old result.
+        ("level_audio", False),
+        ("compute_type", "int8"),
     ):
         other = _settings()
         setattr(other, field, value)
