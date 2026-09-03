@@ -101,3 +101,90 @@ def test_download_file_honours_cancellation(tmp_path):
             tmp_path / "out.bin",
             is_cancelled=always_cancelled,
         )
+
+
+def _flaky_replace(failures: int, calls: list):
+    """A Path.replace that denies access the first *failures* times."""
+
+    from pathlib import Path
+
+    real = Path.replace
+
+    def attempt(self, target):
+        calls.append(str(self))
+        if len(calls) <= failures:
+            raise PermissionError(13, "Acesso negado")
+        return real(self, target)
+
+    return attempt
+
+
+def test_replace_waits_out_a_scanner_holding_the_file(tmp_path, monkeypatch):
+    """The rename that fails right after a big download is retried, not lost."""
+
+    from pathlib import Path
+
+    calls: list = []
+    monkeypatch.setattr(Path, "replace", _flaky_replace(3, calls))
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    source = tmp_path / "ffmpeg-0.zip.part"
+    source.write_bytes(b"conteudo baixado")
+    dest = tmp_path / "ffmpeg-0.zip"
+
+    download.replace_atomically(source, dest)
+
+    assert dest.read_bytes() == b"conteudo baixado"
+    assert not source.exists()
+    assert len(calls) == 4  # three refusals, then it went through
+
+
+def test_replace_falls_back_to_copying_when_the_rename_never_works(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        Path, "replace", lambda self, target: (_ for _ in ()).throw(PermissionError(13, "Acesso negado"))
+    )
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    source = tmp_path / "grande.zip.part"
+    source.write_bytes(b"163 MB de ffmpeg")
+    dest = tmp_path / "grande.zip"
+
+    download.replace_atomically(source, dest)
+
+    # A copy still gets the user their file, even with the source locked.
+    assert dest.read_bytes() == b"163 MB de ffmpeg"
+
+
+def test_replace_reraises_anything_that_is_not_a_lock(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        Path, "replace", lambda self, target: (_ for _ in ()).throw(IsADirectoryError(21, "boom"))
+    )
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    source = tmp_path / "a.part"
+    source.write_bytes(b"x")
+
+    with pytest.raises(OSError):
+        download.replace_atomically(source, tmp_path / "a")
+
+
+def test_replace_tree_retries_then_moves_the_component_folder(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    calls: list = []
+    monkeypatch.setattr(Path, "replace", _flaky_replace(2, calls))
+    monkeypatch.setattr(download.time, "sleep", lambda _seconds: None)
+
+    staging = tmp_path / "ffmpeg.incomplete"
+    staging.mkdir()
+    (staging / "ffmpeg.exe").write_bytes(b"binario")
+    final = tmp_path / "ffmpeg"
+
+    download.replace_tree(staging, final)
+
+    assert (final / "ffmpeg.exe").read_bytes() == b"binario"
+    assert len(calls) == 3

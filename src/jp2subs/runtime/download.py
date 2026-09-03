@@ -5,6 +5,7 @@ being importable.
 """
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import tarfile
@@ -218,7 +219,61 @@ def download_file(
                         )
                     )
 
-    part.replace(dest)
+    replace_atomically(part, dest)
+    return dest
+
+
+#: How long to keep trying a rename a virus scanner is sitting on, in seconds.
+_REPLACE_DELAYS = (0.2, 0.4, 0.8, 1.6, 3.0, 5.0, 5.0, 5.0, 5.0)
+
+
+def replace_atomically(source: Path, dest: Path) -> Path:
+    """Move *source* onto *dest*, waiting out whatever is holding the file.
+
+    On Windows an antivirus opens a file the moment the last handle closes, and
+    a rename inside that window fails with "access denied" — which names the
+    symptom and not the cause. It is worst exactly where it hurts: a large
+    download, in a folder the scanner watches closely, such as Downloads.
+
+    Waiting is nearly always enough. When it is not, copying the bytes still
+    works, because a copy never has to unlink the file being scanned.
+    """
+
+    for delay in _REPLACE_DELAYS:
+        try:
+            source.replace(dest)
+            return dest
+        except PermissionError:
+            time.sleep(delay)
+        except OSError as exc:
+            # Errno 13/32 arrive as PermissionError, but a cross-device move
+            # (a data folder on another drive) needs the copy path instead.
+            if exc.errno not in (errno.EXDEV,):
+                raise
+            break
+
+    shutil.copyfile(source, dest)
+    try:
+        source.unlink()
+    except OSError:  # pragma: no cover - the scanner still has it; harmless
+        pass
+    return dest
+
+
+def replace_tree(source: Path, dest: Path) -> Path:
+    """Same idea for a folder: retry the rename while something holds a file.
+
+    No copy fallback here — a half-copied component tree would look installed
+    without being usable, so it is better to fail and let the caller retry.
+    """
+
+    for delay in _REPLACE_DELAYS:
+        try:
+            source.replace(dest)
+            return dest
+        except PermissionError:
+            time.sleep(delay)
+    source.replace(dest)  # one last attempt, so the real error surfaces
     return dest
 
 

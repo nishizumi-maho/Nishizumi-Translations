@@ -98,6 +98,8 @@ class ComponentInstallWorker(QtCore.QRunnable):
             )
         except DownloadCancelled:
             self.signals.cancelled.emit(self.key)
+        except PermissionError as exc:
+            self.signals.failed.emit(self.key, permission_hint(exc))
         except Exception as exc:  # noqa: BLE001 - the row reports, it does not crash
             self.signals.failed.emit(self.key, str(exc))
         else:
@@ -140,6 +142,26 @@ class RelocateWorker(QtCore.QRunnable):
 
     def _on_progress(self, moved: int, total: int, detail: str) -> None:  # pragma: no cover
         self.signals.progress.emit(moved, total, detail)
+
+
+def permission_hint(exc: OSError) -> str:
+    """Turn "access denied" into something the user can act on.
+
+    The message Windows gives names a path and nothing else. What is almost
+    always happening is a virus scanner holding a freshly downloaded file, and
+    the folder it watches hardest is Downloads.
+    """
+
+    return (
+        f"{exc}\n\n"
+        "O Windows negou acesso ao arquivo. Quase sempre é o antivírus segurando "
+        "o download que acabou de chegar.\n\n"
+        "O que costuma resolver:\n"
+        "• Tentar de novo — o download continua de onde parou.\n"
+        "• Mover a pasta inteira do programa para fora de Downloads, por exemplo "
+        "para C:\\Users\\<seu usuário>\\NishizumiReunioes. É a pasta que o "
+        "antivírus vigia mais de perto."
+    )
 
 
 def format_progress(progress: Progress) -> str:

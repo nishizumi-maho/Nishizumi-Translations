@@ -24,6 +24,7 @@ from .download import (
     find_first,
     flatten_single_root,
     remote_size,
+    replace_tree,
 )
 
 HF_API = "https://huggingface.co/api/models"
@@ -442,7 +443,8 @@ class ComponentManager:
 
         store.remove_path(final)
         final.parent.mkdir(parents=True, exist_ok=True)
-        staging.replace(final)
+        # A scanner can still be walking the files that were just extracted.
+        replace_tree(staging, final)
         self._record(item.key, final, version=version, component=item)
         _emit(on_progress, item.name, 100, f"{item.name} installed")
         return final
@@ -534,7 +536,7 @@ class ComponentManager:
             )
             _emit(on_progress, item.name, -1, "Extracting FFmpeg")
             extract_archive(archive, staging, on_progress=on_progress, label=item.name)
-            archive.unlink(missing_ok=True)
+            _discard(archive)
 
         shutil.rmtree(downloads, ignore_errors=True)
         flatten_single_root(staging)
@@ -592,7 +594,7 @@ class ComponentManager:
                 continue
             _emit(on_progress, item.name, -1, f"Extracting {name}")
             extract_archive(payload, downloads / f"unpacked-{index}", on_progress=on_progress, label=item.name)
-            payload.unlink(missing_ok=True)
+            _discard(payload)
 
         segmentation = _pick_onnx(downloads, ("model.onnx", "segmentation.onnx"))
         embedding = _pick_onnx(downloads, (), exclude={segmentation} if segmentation else set())
@@ -638,7 +640,7 @@ class ComponentManager:
             done += size or wheel.stat().st_size
             unpacked = extracted / dist
             extract_archive(wheel, unpacked, on_progress=on_progress, label=dist)
-            wheel.unlink(missing_ok=True)
+            _discard(wheel)
 
         # Keep only the shared libraries; the Python shims in the wheels are dead weight.
         moved = 0
@@ -667,6 +669,19 @@ def _keep_model_file(name: str) -> bool:
     if any(lowered.endswith(suffix) for suffix in _SKIP_SUFFIXES):
         return False
     return True
+
+
+def _discard(path: Path) -> None:
+    """Delete a file we are done with, and shrug if something still holds it.
+
+    These are archives already unpacked into place. A virus scanner keeping one
+    open for another second is no reason to fail an install that worked.
+    """
+
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:  # pragma: no cover - timing-dependent on Windows
+        pass
 
 
 def _url_filename(url: str) -> str:
