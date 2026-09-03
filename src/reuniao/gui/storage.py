@@ -12,12 +12,24 @@ from jp2subs.runtime import store
 from jp2subs.runtime.manager import manager
 from PySide6 import QtCore, QtWidgets
 
+from .. import portable
 from ..components import human_size
 from .workers import RelocateWorker
 
 
 def change_location(parent: QtWidgets.QWidget) -> bool:
     """Ask for a new folder and switch to it. True when the folder changed."""
+
+    if portable.is_active():
+        QtWidgets.QMessageBox.information(
+            parent,
+            "Modo portátil",
+            f"Neste modo tudo fica junto do programa, em\n{portable.data_dir()}\n\n"
+            "Para levar os modelos para outro lugar, mova a pasta inteira do "
+            f"programa. Para escolher uma pasta separada, apague o arquivo "
+            f"{portable.MARKER_NAME} que fica ao lado do executável.",
+        )
+        return False
 
     forced = store.env_override()
     if forced:

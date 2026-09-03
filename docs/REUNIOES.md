@@ -29,21 +29,40 @@ Eu fecho os números até sexta e mando por e-mail.
 
 ## Instalar
 
-### Windows
+### Windows portátil (sem instalar nada)
 
-Baixe `Nishizumi-Reunioes-Setup-<versão>.exe` no
-[pré-lançamento experimental](https://github.com/nishizumi-maho/Nishizumi-Translations/releases)
-e execute.
+Baixe `Nishizumi-Reunioes-<versão>-windows-portatil.zip`, extraia numa pasta
+sua — Documentos, Área de Trabalho, um pen drive, um segundo disco — e abra
+`NishizumiReunioes.exe`.
+
+É o caminho para computador de trabalho, onde você não é administrador. Nada
+é instalado, nada vai para o registro do Windows e nada é gravado em
+`AppData`: os modelos, o FFmpeg e as suas preferências ficam todos na subpasta
+`dados`, ao lado do programa. Dá para copiar a pasta inteira para outra
+máquina com tudo já baixado dentro.
+
+Quem liga esse comportamento é o arquivo `portatil.txt`, que vem junto.
+Apague-o e o programa volta a guardar os modelos na pasta do usuário.
+
+Se a pasta escolhida não aceitar gravação, o aplicativo avisa na página
+**Componentes** e usa a pasta do usuário — ele não quebra. Nesse caso, mova o
+programa para uma pasta realmente sua.
+
+### Windows com instalador
+
+Baixe `Nishizumi-Reunioes-Setup-<versão>.exe` e execute.
 
 - Instala por usuário, sem pedir senha de administrador.
 - O instalador pergunta duas pastas: a do programa e a dos modelos. Aponte a
   segunda para um disco com espaço — são alguns gigabytes.
-- Convive sem conflito com o Nishizumi Translations instalado.
+- Convive sem conflito com o Nishizumi Translations instalado, e reaproveita
+  os modelos que ele já tiver baixado.
 
 ### Linux
 
-Baixe `Nishizumi-Reunioes-<versão>-linux-x64.tar.gz`, extraia e execute
-`NishizumiReunioes`.
+Baixe `Nishizumi-Reunioes-<versão>-linux-x64-portatil.tar.gz`, extraia e
+execute `NishizumiReunioes`. Vale o mesmo do portátil do Windows: tudo fica na
+subpasta `dados`.
 
 ### A partir do código
 
@@ -65,9 +84,10 @@ Precisa de Python 3.11 ou mais novo.
    falou, a **Identificação de interlocutores** (37 MB).
 3. Volte em **Transcrever**, arraste a gravação e clique em **Transcrever**.
 
-Os modelos ficam na mesma pasta usada pelo Nishizumi Translations. Se você já
-usa o outro aplicativo, o que estiver baixado é reaproveitado — nada é baixado
-duas vezes.
+Na versão instalada, os modelos ficam na mesma pasta usada pelo Nishizumi
+Translations: se você já usa o outro aplicativo, o que estiver baixado é
+reaproveitado. No modo portátil eles ficam dentro da pasta do programa, que é
+o que torna a pasta autossuficiente.
 
 ### Qual modelo escolher
 
@@ -169,6 +189,7 @@ mostrarem os acentos corretamente no Windows.
 | `src/reuniao/speakers.py` | Casa palavra a palavra com a voz de quem falou. |
 | `src/reuniao/writers.py` | Escreve `.txt`, `.srt`, `.vtt` e `.json`. |
 | `src/reuniao/components.py` | O que a página Componentes oferece. |
+| `src/reuniao/portable.py` | Modo portátil: tudo dentro da pasta do programa. |
 | `src/reuniao/gui/` | A janela. |
 | `build_reuniao.py` | Empacota com PyInstaller. |
 | `installer/reuniao.iss` | Instalador do Windows. |

@@ -7,7 +7,7 @@ from jp2subs.gui import icons
 from jp2subs.gui.theme import apply_app_theme
 from PySide6 import QtGui, QtWidgets
 
-from .. import branding
+from .. import branding, portable
 from ..config import load_settings
 from .window import MainWindow
 
@@ -45,6 +45,10 @@ def build_window() -> MainWindow:
 
 def launch() -> None:
     """Entry point for ``reuniao ui`` and the ``reuniao-gui`` script."""
+
+    # Before anything reads a path: this decides whether the models and the
+    # settings live beside the program or in the user profile.
+    portable.activate()
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     _configure_application(app)

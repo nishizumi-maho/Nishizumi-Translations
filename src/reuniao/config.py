@@ -26,7 +26,16 @@ LAYOUTS = ("blocos", "linhas")
 
 
 def config_dir() -> Path:
-    """Where the settings file lives, following the platform convention."""
+    """Where the settings file lives, following the platform convention.
+
+    In portable mode it moves next to the program instead, so a machine that
+    refuses writes to the user profile is not a problem.
+    """
+
+    from .portable import config_dir as portable_config_dir, is_active
+
+    if is_active():
+        return portable_config_dir()
 
     appdata = os.environ.get("APPDATA")
     if appdata:

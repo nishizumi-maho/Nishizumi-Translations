@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import branding, components, diarize
+from . import branding, components, diarize, portable
 from .config import Settings, load_settings, parse_speaker_names, save_settings
 from .pipeline import Cancelled, Job, Runner
 from .progress import ProgressEvent, format_duration_pt
@@ -267,6 +267,8 @@ def _print_progress(event: ProgressEvent) -> None:
 
 
 def main() -> None:
+    # Before anything reads a path, same as the window does.
+    portable.activate()
     app()
 
 

@@ -5,7 +5,7 @@ from jp2subs.gui.common import Banner, Card, ScrollPage, label
 from jp2subs.runtime import store
 from PySide6 import QtCore, QtWidgets
 
-from ... import components
+from ... import components, portable
 from ..storage import change_location
 from ..widgets import ComponentRow, open_folder
 
@@ -40,6 +40,9 @@ class ComponentsPage(ScrollPage):
 
         self.summary_label = label("", "Faint")
         card.body.addWidget(self.summary_label)
+
+        self.mode_label = label("", "Faint")
+        card.body.addWidget(self.mode_label)
 
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(8)
@@ -78,14 +81,27 @@ class ComponentsPage(ScrollPage):
         self.location_label.setText(str(store.data_dir()))
         installed = components.installed_size()
         free = store.free_space()
-        self.summary_label.setText(
-            f"{components.human_size(installed)} instalados · "
-            f"{components.human_size(free)} livres nesse disco"
-        )
+        # human_size renders nothing as an em dash, which reads badly as
+        # "— instalados" on the very first launch, when the page is empty.
+        used = f"{components.human_size(installed)} instalados" if installed else "Nada baixado ainda"
+        self.summary_label.setText(f"{used} · {components.human_size(free)} livres nesse disco")
+        mode = portable.describe()
+        self.mode_label.setText(mode)
+        self.mode_label.setVisible(bool(mode))
+
         missing = components.missing_essentials()
         if missing:
             names = ", ".join(item.name for item in missing)
             self.banner.set_message(f"Ainda falta baixar: {names}.", "warning")
+            self.banner.setVisible(True)
+        elif portable.problem():
+            self.banner.set_message(
+                "O modo portátil foi pedido, mas a pasta do programa não aceita "
+                f"gravação — {portable.problem()}. Os componentes vão para a pasta "
+                "do usuário. Mova o programa para uma pasta sua, como a Área de "
+                "Trabalho ou Documentos.",
+                "warning",
+            )
             self.banner.setVisible(True)
         else:
             self.banner.setVisible(False)

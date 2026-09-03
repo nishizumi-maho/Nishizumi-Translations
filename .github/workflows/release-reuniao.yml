@@ -157,7 +157,7 @@ jobs:
           & "$env:ISCC" "/DMyAppVersion=${{ needs.resolve.outputs.version }}" installer\reuniao.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
-      - name: Checksum
+      - name: Checksum the installer
         shell: pwsh
         run: |
           $setup = Get-ChildItem dist\installer\*.exe | Select-Object -First 1
@@ -166,11 +166,42 @@ jobs:
           "$hash  $($setup.Name)" | Out-File -FilePath "dist\installer\$($setup.Name).sha256" -Encoding ascii
           Write-Host "$($setup.Name): $hash ($([math]::Round($setup.Length/1MB,1)) MB)"
 
+      # The same bundle, with the portable marker in it and no installer at
+      # all: for a machine without admin rights, where writing to Program
+      # Files or AppData is what fails.
+      - name: Package the portable build
+        shell: pwsh
+        run: |
+          $version = "${{ needs.resolve.outputs.version }}"
+          $stage = "dist\portatil"
+          $folder = "$stage\NishizumiReunioes"
+          New-Item -ItemType Directory -Force -Path $stage, "dist\release" | Out-Null
+          Copy-Item -Recurse -Force "dist\NishizumiReunioes" $folder
+          python -m reuniao.portable $folder
+          if (-not (Test-Path "$folder\portatil.txt")) { throw "The portable marker was not written" }
+
+          $zip = "dist\release\Nishizumi-Reunioes-$version-windows-portatil.zip"
+          # 7-Zip ships with the runner and is far quicker than Compress-Archive
+          # on a bundle this size, but the fallback keeps the build honest.
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z a -tzip -mx=5 $zip "$stage\*" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+          } else {
+            Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+          }
+
+          $item = Get-Item $zip
+          $hash = (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($item.Name)" | Out-File -FilePath "$zip.sha256" -Encoding ascii
+          Write-Host "$($item.Name): $hash ($([math]::Round($item.Length/1MB,1)) MB)"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: reunioes-windows
-          path: dist/installer/*
+          path: |
+            dist/installer/*
+            dist/release/*
           retention-days: 14
 
   linux:
@@ -206,7 +237,14 @@ jobs:
       - name: Package and checksum
         run: |
           set -euo pipefail
-          NAME="Nishizumi-Reunioes-${{ needs.resolve.outputs.version }}-linux-x64.tar.gz"
+          # A tarball you extract wherever you like is portable by nature, so
+          # the marker ships in it: the models land beside the program rather
+          # than in the home folder. Deleting portatil.txt restores the usual
+          # per-user location.
+          python -m reuniao.portable "dist/$BUNDLE_NAME"
+          test -f "dist/$BUNDLE_NAME/portatil.txt"
+
+          NAME="Nishizumi-Reunioes-${{ needs.resolve.outputs.version }}-linux-x64-portatil.tar.gz"
           mkdir -p dist/release
           tar -czf "dist/release/$NAME" -C dist "$BUNDLE_NAME"
           cd dist/release
@@ -257,22 +295,27 @@ jobs:
 
           ### O que baixar
 
-          | Sistema | Arquivo |
-          | --- | --- |
-          | Windows | `Nishizumi-Reunioes-Setup-<versão>.exe` |
-          | Linux | `Nishizumi-Reunioes-<versão>-linux-x64.tar.gz` |
+          | Sistema | Arquivo | Quando usar |
+          | --- | --- | --- |
+          | Windows | `...-windows-portatil.zip` | **Sem instalar nada.** Extraia numa pasta sua e abra `NishizumiReunioes.exe`. Modelos e preferências ficam dentro da própria pasta. É o que funciona em computador de trabalho, sem direito de administrador. |
+          | Windows | `Nishizumi-Reunioes-Setup-<versão>.exe` | Instalação normal, por usuário. |
+          | Linux | `...-linux-x64-portatil.tar.gz` | Extraia e rode `NishizumiReunioes`. |
 
           ### Primeiro uso
 
-          1. Instale e abra o aplicativo.
+          1. Abra o aplicativo.
           2. Vá em **Componentes** e baixe o FFmpeg, um modelo de transcrição
              (o *Large v3 Turbo* é o recomendado) e a **Identificação de
              interlocutores**.
           3. Volte em **Transcrever**, arraste a gravação e clique em
              **Transcrever**.
 
-          Os modelos são compartilhados com o Nishizumi Translations: se você já
-          usa o outro aplicativo, o que estiver baixado é reaproveitado.
+          No pacote portátil tudo isso vai para a subpasta `dados`, ao lado do
+          programa: a pasta inteira pode ser copiada para outro disco ou um pen
+          drive. Apagar o arquivo `portatil.txt` devolve o comportamento normal.
+
+          Na versão instalada, os modelos são compartilhados com o Nishizumi
+          Translations: o que já estiver baixado é reaproveitado.
 
           ### Avisos
 
