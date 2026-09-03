@@ -180,15 +180,38 @@ jobs:
           python -m reuniao.portable $folder
           if (-not (Test-Path "$folder\portatil.txt")) { throw "The portable marker was not written" }
 
-          $zip = "dist\release\Nishizumi-Reunioes-$version-windows-portatil.zip"
-          # 7-Zip ships with the runner and is far quicker than Compress-Archive
-          # on a bundle this size, but the fallback keeps the build honest.
-          if (Get-Command 7z -ErrorAction SilentlyContinue) {
-            7z a -tzip -mx=5 $zip "$stage\*" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
-          } else {
-            Compress-Archive -Path "$stage\*" -DestinationPath $zip -CompressionLevel Optimal
+          # Zipped from inside the staging folder on purpose: 7-Zip stores paths
+          # relative to the working directory, not to the wildcard's parent, so
+          # archiving "dist\portatil\*" from the repository root buries the
+          # bundle under dist/portatil/ inside the zip.
+          $zip = Join-Path (Get-Location).Path "dist\release\Nishizumi-Reunioes-$version-windows-portatil.zip"
+          Push-Location $stage
+          try {
+            # 7-Zip ships with the runner and is far quicker than Compress-Archive
+            # on a bundle this size, but the fallback keeps the build honest.
+            if (Get-Command 7z -ErrorAction SilentlyContinue) {
+              7z a -tzip -mx=5 $zip "NishizumiReunioes" | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "7z failed with exit code $LASTEXITCODE" }
+            } else {
+              Compress-Archive -Path "NishizumiReunioes" -DestinationPath $zip -CompressionLevel Optimal
+            }
+          } finally {
+            Pop-Location
           }
+
+          # What the user unzips has to be one folder with the marker beside the
+          # executable. Checking it here is the only place it can be caught
+          # before the file is published.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          $entries = $archive.Entries.FullName
+          $archive.Dispose()
+          foreach ($required in @("NishizumiReunioes/portatil.txt", "NishizumiReunioes/NishizumiReunioes.exe")) {
+            if ($entries -notcontains $required) {
+              throw "The portable zip is laid out wrong: $required is missing. Root entries: $(($entries | ForEach-Object { $_.Split('/')[0] } | Sort-Object -Unique) -join ', ')"
+            }
+          }
+          Write-Host "Portable zip layout verified: $($entries.Count) entries under NishizumiReunioes/"
 
           $item = Get-Item $zip
           $hash = (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLower()
