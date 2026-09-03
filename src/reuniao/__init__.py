@@ -6,4 +6,4 @@ writes a plain text transcript in subtitle style. Nothing else.
 """
 
 __all__ = ["__version__"]
-__version__ = "0.1.4"
+__version__ = "0.2.0"

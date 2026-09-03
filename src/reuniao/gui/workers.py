@@ -15,7 +15,7 @@ from jp2subs.runtime.manager import manager
 from PySide6 import QtCore
 
 from ..components import human_size
-from ..pipeline import Cancelled, Job, Result, Runner
+from ..pipeline import Cancelled, Job, Result, Runner, TrackJob
 from ..progress import ProgressEvent
 
 
@@ -34,7 +34,7 @@ class TranscriptionSignals(QtCore.QObject):
 class TranscriptionWorker(QtCore.QRunnable):
     """Runs one recording through the pipeline off the UI thread."""
 
-    def __init__(self, job: Job):
+    def __init__(self, job: Job | TrackJob):
         super().__init__()
         self.job = job
         self.signals = TranscriptionSignals()
@@ -48,7 +48,10 @@ class TranscriptionWorker(QtCore.QRunnable):
 
     def run(self) -> None:  # pragma: no cover - runs on a worker thread
         try:
-            result: Result = self._runner.run(self.job)
+            if isinstance(self.job, TrackJob):
+                result: Result = self._runner.run_tracks(self.job)
+            else:
+                result = self._runner.run(self.job)
         except Cancelled:
             self.signals.cancelled.emit()
         except Exception as exc:  # noqa: BLE001 - the window reports, it does not crash

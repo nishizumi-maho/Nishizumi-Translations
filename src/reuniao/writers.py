@@ -10,7 +10,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
-from .model import Transcript, Utterance
+from .model import UNCERTAIN_MARK, Transcript, Utterance
 from .progress import format_duration_pt, format_stamp
 
 #: Text files are written with a BOM: it is what makes Notepad and Excel on a
@@ -24,18 +24,29 @@ ARROW = "→"
 RULE = "─" * 72
 
 
-def write_txt(transcript: Transcript, path: str | Path, *, layout: str = "blocos") -> Path:
+def write_txt(
+    transcript: Transcript,
+    path: str | Path,
+    *,
+    layout: str = "blocos",
+    mark_uncertain: bool = True,
+    talk_time: bool = True,
+) -> Path:
     """Write the readable transcript. ``blocos`` is the subtitle-style default."""
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    body = _blocks(transcript) if layout != "linhas" else _lines(transcript)
-    content = "\n".join([*_header(transcript), "", *body, ""])
+    body = (
+        _blocks(transcript, mark_uncertain)
+        if layout != "linhas"
+        else _lines(transcript, mark_uncertain)
+    )
+    content = "\n".join([*_header(transcript, mark_uncertain, talk_time), "", *body, ""])
     path.write_text(content, encoding=TEXT_ENCODING)
     return path
 
 
-def _header(transcript: Transcript) -> list[str]:
+def _header(transcript: Transcript, mark_uncertain: bool = True, talk_time: bool = True) -> list[str]:
     created = _pretty_datetime(transcript.created_at)
     lines = [
         "TRANSCRIÇÃO DA REUNIÃO",
@@ -52,31 +63,63 @@ def _header(transcript: Transcript) -> list[str]:
     else:
         lines.append("Interlocutores: não identificados")
     lines.extend(f"Observação...: {note}" for note in transcript.notes)
+
+    if talk_time and transcript.diarized:
+        rows = transcript.talk_time()
+        if rows:
+            lines.append("")
+            lines.append("Tempo de fala:")
+            width = max(len(name) for name, _seconds, _share in rows)
+            for name, seconds, share in rows:
+                bar = "█" * max(1, round(share * 20))
+                lines.append(
+                    f"  {name:<{width}}  {share * 100:5.1f}%  "
+                    f"{format_duration_pt(seconds):>12}  {bar}"
+                )
+
+    if mark_uncertain and transcript.uncertain_count:
+        count = transcript.uncertain_count
+        subject = (
+            f"A fala marcada com {UNCERTAIN_MARK} saiu"
+            if count == 1
+            else f"As {count} falas marcadas com {UNCERTAIN_MARK} saíram"
+        )
+        lines.append("")
+        lines.extend(
+            textwrap.wrap(
+                f"{subject} com baixa confiança do reconhecimento — vale conferir "
+                "no áudio antes de citar.",
+                width=WRAP_COLUMNS,
+            )
+        )
+
     lines.append(RULE)
     return lines
 
 
-def _blocks(transcript: Transcript) -> list[str]:
+def _blocks(transcript: Transcript, mark_uncertain: bool = True) -> list[str]:
     """Timestamp and speaker on their own line, then the speech, wrapped."""
 
     out: list[str] = []
     for item in transcript.utterances:
         speaker = transcript.name_for(item.speaker)
+        doubt = f" {UNCERTAIN_MARK}" if mark_uncertain and item.uncertain else ""
         head = f"[{format_stamp(item.start)} {ARROW} {format_stamp(item.end)}]"
-        out.append(f"{head}  {speaker}" if speaker else head)
+        out.append(f"{head}  {speaker}{doubt}" if speaker else f"{head}{doubt}")
         out.extend(textwrap.wrap(item.text, width=WRAP_COLUMNS) or [""])
         out.append("")
     return out
 
 
-def _lines(transcript: Transcript) -> list[str]:
+def _lines(transcript: Transcript, mark_uncertain: bool = True) -> list[str]:
     """One turn per line, for grepping and diffing."""
 
     out: list[str] = []
     for item in transcript.utterances:
         speaker = transcript.name_for(item.speaker)
+        doubt = f"{UNCERTAIN_MARK} " if mark_uncertain and item.uncertain else ""
         head = f"[{format_stamp(item.start)} {ARROW} {format_stamp(item.end)}]"
-        out.append(f"{head} {speaker}: {item.text}" if speaker else f"{head} {item.text}")
+        out.append(f"{head} {doubt}{speaker}: {item.text}" if speaker else f"{head} {doubt}{item.text}")
     return out
 
 

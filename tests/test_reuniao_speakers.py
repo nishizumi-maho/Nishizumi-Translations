@@ -153,3 +153,85 @@ def test_the_diarizer_never_pins_a_headcount(monkeypatch):
     assert diarize.diarize([0.0], threshold=0.7) == []
     assert captured["num_clusters"] == -1
     assert captured["threshold"] == 0.7
+
+
+# -- consolidating the speakers the diarizer invented ----------------------
+
+
+def _turn(start, end, text, speaker):
+    return Utterance(start, end, text, speaker, weight=max(1, len(text.split())))
+
+
+def test_splinter_speakers_are_folded_into_whoever_was_talking():
+    """The shape found in a real 2h38 meeting: 36 voices, 23 of them seconds long."""
+
+    from reuniao.speakers import consolidate_speakers
+
+    turns = [
+        _turn(0, 60, "primeira pessoa falando bastante", 0),
+        _turn(61, 62, "é", 4),
+        _turn(63, 120, "e continua falando", 0),
+        _turn(121, 180, "agora a segunda pessoa", 1),
+        _turn(181, 182, "sim", 7),
+        _turn(183, 240, "e a segunda segue", 1),
+    ]
+
+    result, changed = consolidate_speakers(turns)
+
+    assert sorted({item.speaker for item in result}) == [0, 1]
+    assert changed == 2
+    # The speech itself is untouched; only the name on it changed.
+    assert [item.text for item in result][1] == "é"
+
+
+def test_a_splinter_between_two_different_people_is_left_alone():
+    from reuniao.speakers import consolidate_speakers
+
+    turns = [
+        _turn(0, 60, "a primeira pessoa fala", 0),
+        _turn(61, 62, "opa", 5),
+        _turn(63, 120, "e a segunda responde", 1),
+    ]
+
+    result, changed = consolidate_speakers(turns)
+
+    # Handing it to either side would be a guess, so it keeps its own label.
+    assert changed == 0
+    assert len({item.speaker for item in result}) == 3
+
+
+def test_a_short_opening_line_is_not_stolen_by_whoever_speaks_next():
+    from reuniao.speakers import consolidate_speakers
+
+    turns = [_turn(0, 1.2, "bom dia", 0), _turn(2, 90, "então vamos à pauta de hoje", 1)]
+
+    result, changed = consolidate_speakers(turns)
+
+    assert changed == 0
+    assert [item.speaker for item in result] == [0, 1]
+
+
+def test_a_real_speaker_is_never_folded_away_however_briefly_they_speak():
+    from reuniao.speakers import consolidate_speakers
+
+    # Twenty seconds is short for a meeting but far from a splinter.
+    turns = [
+        _turn(0, 60, "a primeira pessoa", 0),
+        _turn(61, 81, "uma intervenção curta mas real de vinte segundos", 2),
+        _turn(82, 140, "e a primeira retoma", 0),
+    ]
+
+    result, changed = consolidate_speakers(turns)
+
+    assert changed == 0
+    assert sorted({item.speaker for item in result}) == [0, 1]  # renumbered, not merged
+
+
+def test_numbering_closes_the_gaps_left_behind():
+    from reuniao.speakers import renumber_speakers
+
+    turns = [_turn(0, 1, "a", 3), _turn(1, 2, "b", 9), _turn(2, 3, "c", 3)]
+
+    result = renumber_speakers(turns)
+
+    assert [item.speaker for item in result] == [0, 1, 0]

@@ -13,8 +13,8 @@ from rich.console import Console
 from rich.table import Table
 
 from . import branding, components, diarize, portable
-from .config import Settings, load_settings, parse_speaker_names, save_settings
-from .pipeline import Cancelled, Job, Runner
+from .config import Settings, load_settings, parse_glossary, parse_speaker_names, save_settings
+from .pipeline import Cancelled, Job, Runner, TrackJob
 from .progress import ProgressEvent, format_duration_pt
 
 app = typer.Typer(
@@ -35,6 +35,20 @@ def transcribe_command(
         True, "--interlocutores/--sem-interlocutores", help="Identificar quem falou cada trecho."
     ),
     nomes: str = typer.Option("", "--nomes", "-n", help='Nomes na ordem de fala: "Ana,João,Carla".'),
+    glossario: str = typer.Option(
+        "",
+        "--glossario",
+        "-g",
+        help="Nomes e siglas: um arquivo de texto (um por linha) ou a lista separada por vírgulas.",
+    ),
+    faixas: bool = typer.Option(
+        False,
+        "--faixas",
+        help="Os arquivos são faixas de UMA reunião, uma por participante, e não reuniões separadas.",
+    ),
+    sem_equalizar: bool = typer.Option(False, "--sem-equalizar", help="Não emparelhar o volume antes de transcrever."),
+    sem_duvidas: bool = typer.Option(False, "--sem-duvidas", help="Não marcar com [?] os trechos de baixa confiança."),
+    sem_reaproveitar: bool = typer.Option(False, "--sem-reaproveitar", help="Ignorar a transcrição guardada e refazer."),
     separacao: float = typer.Option(
         0.0,
         "--separacao",
@@ -64,6 +78,12 @@ def transcribe_command(
     settings.vad = not sem_vad
     if nomes:
         settings.speaker_names = parse_speaker_names(nomes)
+    if glossario:
+        settings.glossary = _read_glossary(glossario)
+    settings.tracks_are_speakers = faixas
+    settings.level_audio = not sem_equalizar
+    settings.mark_uncertain = not sem_duvidas
+    settings.reuse_transcription = not sem_reaproveitar
     if beam:
         settings.beam_size = beam
     if threads:
@@ -73,6 +93,27 @@ def transcribe_command(
     settings.normalize()
 
     _warn_about_setup(settings)
+
+    if faixas:
+        console.rule(f"[bold]{len(arquivo)} faixas de uma reunião")
+        runner = Runner(on_progress=_print_progress, on_log=lambda line: console.log(line))
+        try:
+            result = runner.run_tracks(
+                TrackJob(
+                    sources=list(arquivo),
+                    settings=settings,
+                    output_dir=saida,
+                    names=list(settings.speaker_names),
+                )
+            )
+        except Cancelled:
+            console.print("[yellow]Cancelado.")
+            raise typer.Exit(code=130)
+        except Exception as exc:  # noqa: BLE001 - the CLI reports, it does not crash
+            console.print(f"[red]Falhou:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+        _report(result)
+        return
 
     failures = 0
     for item in arquivo:
@@ -88,20 +129,7 @@ def transcribe_command(
             console.print(f"[red]Falhou:[/red] {exc}")
             continue
 
-        transcript = result.transcript
-        console.print()
-        console.print(f"[green]Pronto:[/green] {result.text_file}")
-        console.print(
-            f"  {len(transcript.utterances)} falas · "
-            f"{format_duration_pt(transcript.duration)} · "
-            + (
-                f"{transcript.speaker_count} interlocutores"
-                if transcript.diarized
-                else "sem identificação de interlocutores"
-            )
-        )
-        for note in transcript.notes:
-            console.print(f"  [yellow]•[/yellow] {note}")
+        _report(result)
 
     if failures:
         raise typer.Exit(code=1)
@@ -194,6 +222,17 @@ def remove_command(chave: list[str] = typer.Argument(..., help="Chaves a desinst
         console.print(f"removido: {key}")
 
 
+@app.command("limpar-cache")
+def clear_cache_command() -> None:
+    """Apaga as transcrições guardadas para reaproveitamento."""
+
+    from . import cache
+
+    size = cache.stored_size()
+    removed = cache.clear()
+    console.print(f"{removed} transcrições apagadas ({components.human_size(size)}).")
+
+
 @app.command("ui")
 def ui_command() -> None:
     """Abre a janela do aplicativo."""
@@ -227,6 +266,38 @@ def config_command(
     console.print(f"[bold]{config_path()}")
     for key, value in settings.to_dict().items():
         console.print(f"  {key} = {value}")
+
+
+def _report(result) -> None:
+    """What came out, in three lines."""
+
+    transcript = result.transcript
+    console.print()
+    console.print(f"[green]Pronto:[/green] {result.text_file}")
+    console.print(
+        f"  {len(transcript.utterances)} falas · "
+        f"{format_duration_pt(transcript.duration)} · "
+        + (
+            f"{transcript.speaker_count} interlocutores"
+            if transcript.diarized
+            else "sem identificação de interlocutores"
+        )
+        + (f" · {transcript.uncertain_count} duvidosas" if transcript.uncertain_count else "")
+    )
+    for note in transcript.notes:
+        console.print(f"  [yellow]•[/yellow] {note}")
+
+
+def _read_glossary(value: str) -> list[str]:
+    """The glossary, from a file when the value names one."""
+
+    candidate = Path(value).expanduser()
+    try:
+        if candidate.is_file():
+            return parse_glossary(candidate.read_text(encoding="utf-8"))
+    except OSError:
+        pass
+    return parse_speaker_names(value)
 
 
 def _install(key: str) -> None:

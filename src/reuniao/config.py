@@ -57,8 +57,12 @@ class Settings:
     #: Empty means "whichever installed model is best".
     model: str = ""
     device: str = "auto"
-    beam_size: int = 5
+    #: Eight rather than the usual five: the model weighs more hypotheses per
+    #: stretch before committing. Costs roughly a third more time.
+    beam_size: int = 8
     vad: bool = True
+    #: Even out the loudness before recognising, and cut the rumble.
+    level_audio: bool = True
     #: Restarts Whisper's context each window, which stops runaway repetition
     #: on long recordings at the cost of a little cross-sentence context.
     avoid_repetition: bool = True
@@ -66,6 +70,8 @@ class Settings:
     threads: int = 0
     compute_type: str = ""
 
+    #: The queue is one meeting with a track per person, not several meetings.
+    tracks_are_speakers: bool = False
     identify_speakers: bool = True
     #: Real names, in the order each voice first speaks. Anything missing keeps
     #: the generic "Interlocutor N" label.
@@ -74,14 +80,30 @@ class Settings:
     #: of people is found from this rather than stated up front — see diarize.py.
     clustering_threshold: float = 0.5
 
+    #: Names, acronyms and jargon worth spelling right. Fed to the recogniser
+    #: as hints, and used to repair near-misses afterwards.
+    glossary: list[str] = field(default_factory=list)
+    #: Flag turns the recogniser was unsure about with [?].
+    mark_uncertain: bool = True
+    #: Collapse the phrase loops Whisper falls into on long recordings.
+    filter_repetitions: bool = True
+    #: Reuse a saved raw transcription instead of transcribing again.
+    reuse_transcription: bool = True
+    #: Talk time per speaker in the transcript header.
+    show_talk_time: bool = True
+
     layout: str = "blocos"
     #: Consecutive lines from the same person are joined while the silence
     #: between them stays under this, up to ``max_block`` seconds in total.
-    merge_gap: float = 1.2
+    #: Three seconds, not one: on a real 2h38 meeting, 157 neighbouring turns
+    #: belonged to the same person and the median gap between them was two
+    #: seconds, so a 1.2 s window joined barely a third of them.
+    merge_gap: float = 3.0
     max_block: float = 40.0
     also_srt: bool = False
     also_vtt: bool = False
-    also_json: bool = False
+    #: On by default: it is what lets the Review page reopen a past run.
+    also_json: bool = True
     output_dir: str = ""
 
     theme: str = "dark"
@@ -108,6 +130,7 @@ class Settings:
         self.merge_gap = max(0.0, min(10.0, float(self.merge_gap)))
         self.max_block = max(5.0, min(600.0, float(self.max_block)))
         self.speaker_names = [str(name).strip() for name in self.speaker_names if str(name).strip()]
+        self.glossary = [str(term).strip() for term in self.glossary if str(term).strip()]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -134,6 +157,12 @@ def save_settings(settings: Settings, path: Path | None = None) -> Path:
         json.dumps(settings.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     return target
+
+
+def parse_glossary(raw: str) -> list[str]:
+    """One term per line, blank lines ignored."""
+
+    return [line.strip() for line in str(raw or "").splitlines() if line.strip()]
 
 
 def parse_speaker_names(raw: str) -> list[str]:

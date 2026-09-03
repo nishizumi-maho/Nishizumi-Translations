@@ -14,6 +14,19 @@ from .model import Segment, SpeakerSpan, Utterance, Word
 #: How far a word may sit from any diarized span and still be attributed to it.
 NEAREST_TOLERANCE = 0.75
 
+#: A voice holding less than this share of the speech, and less than
+#: :data:`TINY_SPEAKER_SECONDS` in total, is treated as a splinter of a real
+#: speaker rather than a person. Measured on a real 2h38 meeting: 23 of the 36
+#: "speakers" found held two minutes between them, and 41 of their turns sat
+#: alone between two turns of the same other person.
+TINY_SPEAKER_SHARE = 0.01
+TINY_SPEAKER_SECONDS = 15.0
+
+#: An aside this short, surrounded by one other voice, is read as belonging to
+#: that voice: too little sound to fingerprint, and backchannel either way.
+ISLAND_SECONDS = 1.5
+ISLAND_WORDS = 3
+
 
 class SpeakerTimeline:
     """Fast "who was speaking at this moment?" lookups over sorted spans."""
@@ -94,13 +107,31 @@ def _split_segment(segment: Segment, timeline: SpeakerTimeline) -> list[Utteranc
     if not text:
         return []
     if not timeline:
-        return [Utterance(start=segment.start, end=segment.end, text=text, speaker=None)]
+        return [
+            Utterance(
+                start=segment.start,
+                end=segment.end,
+                text=text,
+                speaker=None,
+                confidence=segment.confidence,
+                weight=max(1, len(text.split())),
+            )
+        ]
 
     words = [word for word in segment.words if word.text.strip()]
     if not words:
         # No word timings: the whole segment goes to whoever dominates it.
         speaker = timeline.speaker_at(segment.start, segment.end)
-        return [Utterance(start=segment.start, end=segment.end, text=text, speaker=speaker)]
+        return [
+            Utterance(
+                start=segment.start,
+                end=segment.end,
+                text=text,
+                speaker=speaker,
+                confidence=segment.confidence,
+                weight=max(1, len(text.split())),
+            )
+        ]
 
     labelled = [(word, timeline.speaker_at(word.start, word.end)) for word in words]
     _fill_gaps(labelled)
@@ -140,7 +171,15 @@ def _fill_gaps(labelled: list[tuple[Word, int | None]]) -> None:
 
 def _utterance_from(words: list[Word], speaker: int | None) -> Utterance:
     text = "".join(word.text for word in words).strip()
-    return Utterance(start=words[0].start, end=words[-1].end, text=text, speaker=speaker)
+    confidence = sum(word.confidence for word in words) / len(words)
+    return Utterance(
+        start=words[0].start,
+        end=words[-1].end,
+        text=text,
+        speaker=speaker,
+        confidence=confidence,
+        weight=len(words),
+    )
 
 
 def merge_runs(
@@ -153,16 +192,136 @@ def merge_runs(
         if not item.text:
             continue
         if not merged:
-            merged.append(Utterance(item.start, item.end, item.text, item.speaker))
+            merged.append(
+                Utterance(item.start, item.end, item.text, item.speaker, item.confidence, item.weight)
+            )
             continue
 
         previous = merged[-1]
         same_person = previous.speaker == item.speaker
+        # Doubtful speech stays in its own turn. Merged into a confident
+        # paragraph its low confidence would average away, and the mark that
+        # should point at one mumbled sentence would either vanish or smear
+        # over forty seconds of perfectly good transcript.
+        same_certainty = previous.uncertain == item.uncertain
         gap = item.start - previous.end
         length = item.end - previous.start
-        if same_person and gap <= merge_gap and length <= max_block:
+        if same_person and same_certainty and gap <= merge_gap and length <= max_block:
             previous.end = item.end
             previous.text = f"{previous.text} {item.text}".strip()
+            # Weighted by word count: averaging two averages would let a
+            # three-word aside outvote a paragraph.
+            total = previous.weight + item.weight
+            previous.confidence = (
+                previous.confidence * previous.weight + item.confidence * item.weight
+            ) / max(1, total)
+            previous.weight = total
         else:
-            merged.append(Utterance(item.start, item.end, item.text, item.speaker))
+            merged.append(
+                Utterance(item.start, item.end, item.text, item.speaker, item.confidence, item.weight)
+            )
     return merged
+
+
+def consolidate_speakers(
+    turns: list[Utterance],
+    *,
+    tiny_share: float = TINY_SPEAKER_SHARE,
+    tiny_seconds: float = TINY_SPEAKER_SECONDS,
+) -> tuple[list[Utterance], int]:
+    """Fold away the speakers the diarizer invented.
+
+    Clustering short, noisy speech invents people: a cough, an overlap or one
+    word from across the room becomes its own voice. They are recognisable
+    without hearing anything, because a person in a meeting talks for minutes
+    and a splinter talks for seconds.
+
+    Nothing is deleted — the speech keeps its place and its timing, and only
+    the name on it changes, to whoever was talking around it.
+    """
+
+    if not turns:
+        return turns, 0
+
+    seconds: dict[int | None, float] = {}
+    for item in turns:
+        if item.speaker is not None:
+            seconds[item.speaker] = seconds.get(item.speaker, 0.0) + item.duration
+    total = sum(seconds.values())
+    if not total:
+        return turns, 0
+
+    splinters = {
+        speaker
+        for speaker, value in seconds.items()
+        if value < tiny_seconds and (value / total) < tiny_share
+    }
+
+    changed = 0
+    for index, item in enumerate(turns):
+        if item.speaker is None:
+            continue
+        is_splinter = item.speaker in splinters
+        is_island = item.duration <= ISLAND_SECONDS and len(item.text.split()) <= ISLAND_WORDS
+        if not is_splinter and not is_island:
+            continue
+        # A splinter carries its own evidence — this "speaker" barely exists —
+        # so one neighbour is enough to place it. A merely short turn does not:
+        # the first thing said in a meeting is often three words, and with only
+        # the turn after it to go on, absorbing it would just hand it to
+        # whoever spoke next.
+        host = _surrounding_speaker(turns, index, splinters, one_sided=is_splinter)
+        if host is not None and host != item.speaker:
+            item.speaker = host
+            changed += 1
+
+    return renumber_speakers(turns), changed
+
+
+def _surrounding_speaker(
+    turns: list[Utterance], index: int, splinters: set[int], *, one_sided: bool
+) -> int | None:
+    """Who was talking either side of ``turns[index]``.
+
+    Both sides have to agree: a turn between two different people is a real
+    handover, and guessing which of them it belongs to would be worse than
+    leaving it alone. With ``one_sided`` a single neighbour will do, for turns
+    already known to belong to nobody.
+    """
+
+    before = _neighbour(turns, index, -1, splinters)
+    after = _neighbour(turns, index, 1, splinters)
+    if before is not None and after is not None:
+        return before if before == after else None
+    if not one_sided:
+        return None
+    return before if before is not None else after
+
+
+def _neighbour(turns: list[Utterance], index: int, step: int, splinters: set[int]) -> int | None:
+    position = index + step
+    while 0 <= position < len(turns):
+        speaker = turns[position].speaker
+        if speaker is not None and speaker not in splinters:
+            return speaker
+        position += step
+    return None
+
+
+def renumber_speakers(turns: list[Utterance]) -> list[Utterance]:
+    """Relabel voices 0, 1, 2... in order of first speech, with no gaps.
+
+    Absorbing a splinter leaves a hole in the numbering, and a transcript that
+    jumps from Interlocutor 3 to Interlocutor 9 reads like someone is missing.
+    """
+
+    mapping: dict[int, int] = {}
+    for item in turns:
+        if item.speaker is None:
+            continue
+        if item.speaker not in mapping:
+            mapping[item.speaker] = len(mapping)
+    for item in turns:
+        if item.speaker is not None:
+            item.speaker = mapping[item.speaker]
+    return turns

@@ -84,8 +84,12 @@ def test_json_names_its_fields_in_portuguese(tmp_path):
         "fim": 12.5,
         "interlocutor": "Ana",
         "texto": "Bom dia a todos, vamos começar.",
+        "confianca": 1.0,
+        "duvidoso": False,
     }
     assert data["interlocutores_identificados"] is True
+    # Talk time is there for whatever reads the file next.
+    assert [row["interlocutor"] for row in data["tempo_de_fala"]] == ["Interlocutor 2", "Ana"]
 
 
 def test_a_second_run_never_overwrites_the_first_transcript(tmp_path):

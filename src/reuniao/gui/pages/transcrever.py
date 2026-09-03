@@ -11,12 +11,13 @@ from ...config import (
     DEFAULT_PROMPT,
     Settings,
     load_settings,
+    parse_glossary,
     parse_speaker_names,
     save_settings,
 )
 from ...diarize import DEFAULT_THRESHOLD, THRESHOLD_CHOICES, unavailable_reason
 from ...media import is_media
-from ...pipeline import Job, Result
+from ...pipeline import Job, Result, TrackJob
 from ...progress import ProgressEvent
 from ..widgets import DropZone, browse_recordings, open_file, open_folder
 from ..workers import TranscriptionWorker
@@ -27,6 +28,8 @@ class TranscribePage(ScrollPage):
 
     #: Asks the window to switch pages, e.g. to Componentes.
     navigate = QtCore.Signal(str)
+    #: A finished Transcript, for the Review page to open.
+    transcript_ready = QtCore.Signal(object)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None):
         super().__init__(
@@ -102,6 +105,15 @@ class TranscribePage(ScrollPage):
         self.model_combo.activated.connect(self._on_model_activated)
         form.addRow("Modelo", self.model_combo)
 
+        self.tracks_check = QtWidgets.QCheckBox("Cada arquivo é um participante (uma faixa por pessoa)")
+        self.tracks_check.setToolTip(
+            "Para gravações do Teams, Meet ou Zoom exportadas com uma faixa por "
+            "pessoa. A fila inteira vira uma reunião só, e quem falou vem do "
+            "arquivo — sem separação de vozes, sem erro de atribuição."
+        )
+        self.tracks_check.toggled.connect(self._on_tracks_toggled)
+        form.addRow("Faixas", self.tracks_check)
+
         self.speakers_check = QtWidgets.QCheckBox("Identificar quem falou cada trecho")
         self.speakers_check.toggled.connect(self._on_speakers_toggled)
         form.addRow("Interlocutores", self.speakers_check)
@@ -120,7 +132,19 @@ class TranscribePage(ScrollPage):
 
         self.names_edit = QtWidgets.QLineEdit()
         self.names_edit.setPlaceholderText("Ana, João, Carla — na ordem em que falam pela primeira vez")
-        form.addRow("Nomes (opcional)", self.names_edit)
+        form.addRow("Quem é quem", self.names_edit)
+
+        self.glossary_edit = QtWidgets.QPlainTextEdit()
+        self.glossary_edit.setMaximumHeight(84)
+        self.glossary_edit.setPlaceholderText(
+            "Um por linha: nomes de pessoas, projetos, clientes e siglas da empresa"
+        )
+        self.glossary_edit.setToolTip(
+            "O reconhecimento recebe esta lista como dica, e depois a grafia é "
+            "conferida contra ela. É o que mais melhora nome próprio e sigla, "
+            "que é justamente o que uma ata precisa acertar."
+        )
+        form.addRow("Glossário", self.glossary_edit)
 
         self.layout_combo = QtWidgets.QComboBox()
         self.layout_combo.addItem("Blocos (horário, nome, fala)", "blocos")
@@ -197,6 +221,26 @@ class TranscribePage(ScrollPage):
         self.gap_spin.setToolTip("Pausa máxima para juntar duas falas seguidas da mesma pessoa.")
         form.addRow("Juntar falas até", self.gap_spin)
 
+        self.level_check = QtWidgets.QCheckBox("Equalizar o volume antes de transcrever")
+        self.level_check.setToolTip(
+            "Aproxima o volume de quem está longe do gravador e corta o ronco de "
+            "ar-condicionado e mesa. Recomendado para gravador único numa sala."
+        )
+        form.addRow("Áudio", self.level_check)
+
+        self.uncertain_check = QtWidgets.QCheckBox("Marcar com [?] o que saiu duvidoso")
+        form.addRow("Dúvidas", self.uncertain_check)
+
+        self.repetition_filter_check = QtWidgets.QCheckBox("Descartar trechos repetidos em loop")
+        form.addRow("Repetições", self.repetition_filter_check)
+
+        self.reuse_check = QtWidgets.QCheckBox("Reaproveitar transcrição já feita do mesmo arquivo")
+        self.reuse_check.setToolTip(
+            "Guarda o reconhecimento assim que ele termina. Repetir a mesma "
+            "gravação com os mesmos ajustes pula a parte que leva horas."
+        )
+        form.addRow("Reaproveitar", self.reuse_check)
+
         self.prompt_edit = QtWidgets.QPlainTextEdit()
         self.prompt_edit.setMaximumHeight(70)
         self.prompt_edit.setPlaceholderText(DEFAULT_PROMPT)
@@ -248,7 +292,10 @@ class TranscribePage(ScrollPage):
         self.open_text_btn.clicked.connect(self._open_text)
         self.open_folder_btn = QtWidgets.QPushButton("Abrir a pasta")
         self.open_folder_btn.clicked.connect(self._open_folder)
-        for button in (self.open_text_btn, self.open_folder_btn):
+        self.review_btn = QtWidgets.QPushButton("Revisar ouvindo")
+        self.review_btn.setToolTip("Ler a transcrição com a gravação tocando junto.")
+        self.review_btn.clicked.connect(lambda: self.navigate.emit("revisar"))
+        for button in (self.open_text_btn, self.open_folder_btn, self.review_btn):
             button.setEnabled(False)
             result_row.addWidget(button)
         result_row.addStretch(1)
@@ -260,10 +307,12 @@ class TranscribePage(ScrollPage):
 
     def _load_settings_into_form(self) -> None:
         settings = self.settings
+        self.tracks_check.setChecked(settings.tracks_are_speakers)
         self.speakers_check.setChecked(settings.identify_speakers)
         index = self.separation_combo.findData(settings.clustering_threshold)
         self.separation_combo.setCurrentIndex(index if index >= 0 else 0)
         self.names_edit.setText(", ".join(settings.speaker_names))
+        self.glossary_edit.setPlainText("\n".join(settings.glossary))
         self.layout_combo.setCurrentIndex(max(0, self.layout_combo.findData(settings.layout)))
         self.srt_check.setChecked(settings.also_srt)
         self.vtt_check.setChecked(settings.also_vtt)
@@ -276,16 +325,23 @@ class TranscribePage(ScrollPage):
         self.threads_spin.setValue(settings.threads)
         self.compute_combo.setCurrentIndex(max(0, self.compute_combo.findData(settings.compute_type)))
         self.gap_spin.setValue(settings.merge_gap)
+        self.level_check.setChecked(settings.level_audio)
+        self.uncertain_check.setChecked(settings.mark_uncertain)
+        self.repetition_filter_check.setChecked(settings.filter_repetitions)
+        self.reuse_check.setChecked(settings.reuse_transcription)
         if settings.initial_prompt and settings.initial_prompt != DEFAULT_PROMPT:
             self.prompt_edit.setPlainText(settings.initial_prompt)
         self._on_speakers_toggled(settings.identify_speakers)
+        self._on_tracks_toggled(settings.tracks_are_speakers)
 
     def _collect_settings(self) -> Settings:
         settings = self.settings
         settings.model = self.model_combo.currentData() or ""
+        settings.tracks_are_speakers = self.tracks_check.isChecked()
         settings.identify_speakers = self.speakers_check.isChecked()
         settings.clustering_threshold = self.separation_combo.currentData() or DEFAULT_THRESHOLD
         settings.speaker_names = parse_speaker_names(self.names_edit.text())
+        settings.glossary = parse_glossary(self.glossary_edit.toPlainText())
         settings.layout = self.layout_combo.currentData() or "blocos"
         settings.also_srt = self.srt_check.isChecked()
         settings.also_vtt = self.vtt_check.isChecked()
@@ -298,6 +354,10 @@ class TranscribePage(ScrollPage):
         settings.threads = self.threads_spin.value()
         settings.compute_type = self.compute_combo.currentData() or ""
         settings.merge_gap = self.gap_spin.value()
+        settings.level_audio = self.level_check.isChecked()
+        settings.mark_uncertain = self.uncertain_check.isChecked()
+        settings.filter_repetitions = self.repetition_filter_check.isChecked()
+        settings.reuse_transcription = self.reuse_check.isChecked()
         settings.initial_prompt = self.prompt_edit.toPlainText().strip() or DEFAULT_PROMPT
         settings.normalize()
         save_settings(settings)
@@ -343,6 +403,16 @@ class TranscribePage(ScrollPage):
                 return
 
         self.banner.setVisible(False)
+
+    def _on_tracks_toggled(self, checked: bool) -> None:
+        # With a track per person there is nothing left to tell apart.
+        self.speakers_check.setEnabled(not checked)
+        self.separation_combo.setEnabled(not checked and self.speakers_check.isChecked())
+        self.names_edit.setPlaceholderText(
+            "Ana, João, Carla — na ordem dos arquivos na lista"
+            if checked
+            else "Ana, João, Carla — na ordem em que falam pela primeira vez"
+        )
 
     def _on_speakers_toggled(self, checked: bool) -> None:
         self.separation_combo.setEnabled(checked)
@@ -419,11 +489,27 @@ class TranscribePage(ScrollPage):
             self.navigate.emit("componentes")
             return
 
-        self._queue = list(paths)
         self._results = []
         self.log.clear()
         self.progress.setValue(0)
         self._set_running(True)
+
+        if self.tracks_check.isChecked():
+            # The whole queue is one meeting, not one meeting each.
+            self._queue = []
+            self._append_log(f"— {len(paths)} faixas de uma reunião")
+            output_dir = Path(settings.output_dir) if settings.output_dir else None
+            self._start_worker(
+                TrackJob(
+                    sources=list(paths),
+                    settings=settings,
+                    output_dir=output_dir,
+                    names=list(settings.speaker_names),
+                )
+            )
+            return
+
+        self._queue = list(paths)
         self._run_next()
 
     def _run_next(self) -> None:
@@ -433,9 +519,10 @@ class TranscribePage(ScrollPage):
 
         source = self._queue.pop(0)
         output_dir = Path(self.settings.output_dir) if self.settings.output_dir else None
-        job = Job(source=source, settings=self.settings, output_dir=output_dir)
-
         self._append_log(f"— {source.name}")
+        self._start_worker(Job(source=source, settings=self.settings, output_dir=output_dir))
+
+    def _start_worker(self, job) -> None:
         worker = TranscriptionWorker(job)
         worker.signals.progress.connect(self._on_progress)
         worker.signals.log.connect(self._append_log)
@@ -458,6 +545,7 @@ class TranscribePage(ScrollPage):
         if running:
             self.open_text_btn.setEnabled(False)
             self.open_folder_btn.setEnabled(False)
+            self.review_btn.setEnabled(False)
 
     # -- worker signals ---------------------------------------------------
 
@@ -486,6 +574,9 @@ class TranscribePage(ScrollPage):
         self._append_log(f"Pronto: {result.text_file} ({summary})")
         for note in transcript.notes:
             self._append_log(f"Atenção: {note}")
+        # The Review page opens the last one transcribed, which is the one
+        # somebody is going to want to check.
+        self.transcript_ready.emit(transcript)
         self._run_next()
 
     def _on_cancelled(self) -> None:
@@ -518,6 +609,7 @@ class TranscribePage(ScrollPage):
         self.detail_label.setText(str(self._results[-1].text_file or ""))
         self.open_text_btn.setEnabled(True)
         self.open_folder_btn.setEnabled(True)
+        self.review_btn.setEnabled(True)
         if self.settings.open_when_done:
             self._open_text()
 

@@ -60,10 +60,25 @@ def probe_duration(path: str | Path) -> float:
         return 0.0
 
 
+#: Applied before recognition when levelling is on.
+#:
+#: ``highpass`` clears the rumble a table-top recorder picks up — air
+#: conditioning, chairs, the desk itself — which carries no speech at all.
+#: ``loudnorm`` is the one that matters in a meeting room: it brings the person
+#: at the far end of the table up to the same loudness as the one next to the
+#: recorder. Whisper copes with noise far better than it copes with a quiet
+#: voice, so evening out the levels buys more than any denoiser would.
+#:
+#: Deliberately no noise reduction: Whisper was trained on noisy audio, and
+#: aggressive denoising strips the cues it relies on.
+LEVEL_FILTER = "highpass=f=80,loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
 def prepare_audio(
     source: str | Path,
     workdir: str | Path,
     *,
+    level: bool = True,
     register_subprocess: Callable[[subprocess.Popen], None] | None = None,
 ) -> Path:
     """Decode *source* to a 16 kHz mono WAV inside *workdir* and return it."""
@@ -86,10 +101,10 @@ def prepare_audio(
         "1",
         "-ar",
         str(SAMPLE_RATE),
-        "-c:a",
-        "pcm_s16le",
-        str(target),
     ]
+    if level:
+        command += ["-af", LEVEL_FILTER]
+    command += ["-c:a", "pcm_s16le", str(target)]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if register_subprocess:
         register_subprocess(process)

@@ -8,6 +8,18 @@ from typing import Any
 #: Fallback label when a voice has no name from the user.
 SPEAKER_LABEL = "Interlocutor {number}"
 
+#: Mean word confidence under which a turn is flagged for a human to check.
+#: Whisper is confidently wrong more often than it is unsure, so this catches
+#: the mumbled and the drowned-out rather than every mistake.
+UNCERTAIN_BELOW = 0.6
+
+#: What a flagged turn is prefixed with in the text file.
+UNCERTAIN_MARK = "[?]"
+
+#: Shown where speakers were identified but this stretch matched no voice —
+#: crosstalk, or someone too far from the microphone.
+UNKNOWN_SPEAKER = "Não identificado"
+
 
 @dataclass
 class Word:
@@ -16,6 +28,8 @@ class Word:
     start: float
     end: float
     text: str
+    #: How sure Whisper was, 0..1. 1.0 when the engine did not say.
+    confidence: float = 1.0
 
 
 @dataclass
@@ -26,6 +40,8 @@ class Segment:
     end: float
     text: str
     words: list[Word] = field(default_factory=list)
+    #: Mean word confidence, 0..1.
+    confidence: float = 1.0
 
 
 @dataclass
@@ -47,10 +63,19 @@ class Utterance:
     text: str
     #: ``None`` when speakers were not identified.
     speaker: int | None = None
+    #: Mean word confidence over the turn, 0..1.
+    confidence: float = 1.0
+    #: How many words the confidence was averaged over, so merging two turns
+    #: can weight them properly instead of averaging the averages.
+    weight: int = 1
 
     @property
     def duration(self) -> float:
         return max(0.0, self.end - self.start)
+
+    @property
+    def uncertain(self) -> bool:
+        return self.confidence < UNCERTAIN_BELOW
 
 
 @dataclass
@@ -75,11 +100,35 @@ class Transcript:
     def speaker_count(self) -> int:
         return len({item.speaker for item in self.utterances if item.speaker is not None})
 
+    def talk_time(self) -> list[tuple[str, float, float]]:
+        """(name, seconds, share) per speaker, longest first.
+
+        Silence and crosstalk mean the shares are of *speech*, not of the
+        recording, so they add up to 100% between the people who spoke.
+        """
+
+        seconds: dict[int | None, float] = {}
+        for item in self.utterances:
+            seconds[item.speaker] = seconds.get(item.speaker, 0.0) + item.duration
+        total = sum(seconds.values())
+        rows = [
+            (self.name_for(speaker), value, (value / total) if total else 0.0)
+            for speaker, value in seconds.items()
+        ]
+        return sorted(rows, key=lambda row: row[1], reverse=True)
+
+    @property
+    def uncertain_count(self) -> int:
+        return sum(1 for item in self.utterances if item.uncertain)
+
     def name_for(self, speaker: int | None) -> str:
         """Display name for a speaker number, falling back to a generic label."""
 
         if speaker is None:
-            return ""
+            # In a transcript with no speakers at all, every turn is unnamed
+            # and saying so on each one would be noise. Once the voices *are*
+            # separated, a turn nobody could be attributed to is worth naming.
+            return UNKNOWN_SPEAKER if self.diarized else ""
         if 0 <= speaker < len(self.speaker_names) and self.speaker_names[speaker]:
             return self.speaker_names[speaker]
         return SPEAKER_LABEL.format(number=speaker + 1)
@@ -94,12 +143,18 @@ class Transcript:
             "interlocutores_identificados": self.diarized,
             "interlocutores": [self.name_for(index) for index in range(len(self.speaker_names))],
             "observacoes": list(self.notes),
+            "tempo_de_fala": [
+                {"interlocutor": name, "segundos": round(seconds, 1), "porcentagem": round(share * 100, 1)}
+                for name, seconds, share in self.talk_time()
+            ],
             "falas": [
                 {
                     "inicio": round(item.start, 3),
                     "fim": round(item.end, 3),
                     "interlocutor": self.name_for(item.speaker),
                     "texto": item.text,
+                    "confianca": round(item.confidence, 3),
+                    "duvidoso": item.uncertain,
                 }
                 for item in self.utterances
             ],

@@ -102,6 +102,45 @@ o que torna a pasta autossuficiente.
 Sem uma placa NVIDIA, uma reunião de uma hora com o Large v3 pode levar horas.
 O Turbo é várias vezes mais rápido e quase tão bom.
 
+O aplicativo carrega modelos no formato **CTranslate2**. A maioria dos
+fine-tunes publicados no Hugging Face está em formato PyTorch e não carrega
+direto; seria preciso convertê-los antes com `ct2-transformers-converter`.
+
+## O que mais melhora o resultado
+
+Em ordem de impacto, medido ou fundamentado:
+
+**1. Preencha "Nomes e siglas".** Um termo por linha: pessoas, projetos,
+clientes, siglas internas. A lista é passada ao reconhecimento como dica *e*
+usada depois para conferir a grafia. Nome próprio e sigla são o que o Whisper
+mais erra e o que uma ata mais precisa acertar. Sozinho, é o maior ganho
+disponível.
+
+**2. Equalizar o volume** (ligado por padrão). Numa sala com um gravador só,
+quem está longe do aparelho sai baixo — e volume baixo o Whisper erra bem mais
+que ruído. O preparo emparelha os volumes e corta o ronco de ar-condicionado e
+mesa. De propósito **não** há redução de ruído: o Whisper foi treinado com
+áudio ruidoso, e filtrar demais remove as pistas de que ele depende.
+
+**3. Uma faixa por participante**, quando der. Se a reunião for por Teams,
+Meet ou Zoom com gravação separada por pessoa, marque **Faixas** e coloque
+todos os arquivos na fila: viram uma reunião só, cada um um interlocutor. Aí
+não há adivinhação de voz nenhuma, e a fala cruzada para de comer palavras.
+É o melhor resultado possível — mas só serve com as faixas separadas em mãos.
+
+**4. Modelo maior e beam maior.** O beam já vem em 8 (o usual é 5): o modelo
+pesa mais hipóteses antes de decidir cada trecho, ao custo de cerca de um terço
+a mais de tempo.
+
+**5. A gravação em si** manda em tudo. Nenhum modelo recupera o que o
+microfone não capturou. Gravador no meio da mesa, perto de quem mais fala,
+vale mais que qualquer ajuste desta lista.
+
+O que **não** compensa: redução de ruído agressiva, e trocar o modelo genérico
+por um fine-tune de português treinado em fala lida — reunião é fala
+espontânea, com gente falando por cima e microfone longe, e um modelo afinado
+em áudio limpo costuma piorar aí.
+
 ## Como os interlocutores são identificados
 
 O pacote de vozes usa dois modelos ONNX: um separa a gravação em trechos de
@@ -124,12 +163,55 @@ Preencha também o campo **Nomes** com `Ana, João, Carla` na ordem em que cada
 um fala pela primeira vez, e o texto sai com os nomes no lugar de
 "Interlocutor 1".
 
+Depois de separar, o aplicativo ainda **consolida** o resultado. Agrupar fala
+curta e ruidosa inventa gente: uma tosse, uma sobreposição ou uma palavra do
+outro lado da sala viram uma "voz" própria. Numa reunião real de 2h38, das 36
+vozes encontradas, 23 somavam dois minutos entre todas. Quem tem tempo de fala
+irrisório e aparece cercado por uma mesma outra pessoa é tratado como fragmento
+dela: o texto continua no lugar, só muda o nome em cima. Quando o trecho está
+entre duas pessoas **diferentes**, ele fica como está — ali chutar seria pior.
+
 O programa **não reconhece pessoas**: ele só distingue vozes dentro daquela
 gravação. Vozes muito parecidas, muita conversa cruzada ou um microfone
 distante atrapalham.
 
 Sem o pacote instalado, a transcrição sai normalmente — só sem os nomes, com os
 horários de sempre.
+
+## Revisar ouvindo
+
+A aba **Revisar** abre a transcrição com a gravação junto. Clique numa fala e
+o áudio pula para aquele momento; com **Acompanhar** ligado a lista rola
+sozinha seguindo o que está tocando. Dá para procurar no texto, e a velocidade
+vai até 2×.
+
+É assim que se resolvem as duas perguntas que o texto não responde sozinho:
+quem é o "Interlocutor 3", e se um trecho marcado com `[?]` diz mesmo aquilo.
+Para reabrir uma transcrição antiga, use **Abrir transcrição...** e escolha o
+`.json` — deixe a gravação na mesma pasta que ele acha sozinho.
+
+## O que o texto marca
+
+- **`[?]`** — o reconhecimento saiu com baixa confiança nessa fala. Confira no
+  áudio antes de citar. Falas duvidosas nunca são fundidas com as boas, para a
+  marca apontar a frase certa e não um parágrafo inteiro.
+- **Tempo de fala** no cabeçalho: quanto cada interlocutor falou, em minutos e
+  porcentagem.
+- **Observações** no cabeçalho: quantas repetições foram descartadas, quantas
+  palavras o glossário ajustou, quantas falas soltas foram atribuídas a quem
+  falava em volta.
+
+Quando o Whisper entra em loop — a mesma frase repetida por minutos sobre um
+silêncio — o filtro reduz a uma ocorrência e registra no cabeçalho.
+
+## Reaproveitar o que já foi transcrito
+
+O reconhecimento é guardado assim que termina, junto dos modelos. Rodar a mesma
+gravação de novo com os mesmos ajustes pula direto para a parte rápida, em vez
+de refazer a hora de transcrição. Mudar o modelo, o beam, o contexto ou o
+glossário invalida o que estava guardado, porque o resultado mudaria.
+
+`reuniao limpar-cache` apaga tudo o que estiver guardado.
 
 ## Pela linha de comando
 
@@ -148,6 +230,11 @@ Opções úteis do `transcrever`:
 | --- | --- |
 | `--nomes "Ana,João"` | Nomes na ordem da primeira fala. |
 | `--separacao 0.35` | Separa mais as vozes. Acima de 0.5 junta mais. |
+| `--glossario nomes.txt` | Nomes e siglas, de um arquivo ou separados por vírgula. |
+| `--faixas` | Os arquivos são faixas de uma reunião, uma por pessoa. |
+| `--sem-equalizar` | Não emparelhar o volume no preparo. |
+| `--sem-duvidas` | Não marcar `[?]` nos trechos de baixa confiança. |
+| `--sem-reaproveitar` | Ignorar a transcrição guardada e refazer. |
 | `--formato linhas` | Uma linha por fala, bom para `grep` e comparação. |
 | `--srt` `--vtt` `--json` | Formatos extras além do `.txt`. |
 | `--dispositivo cpu` | Força o processador quando a GPU dá problema. |
@@ -190,6 +277,9 @@ mostrarem os acentos corretamente no Windows.
 | `src/reuniao/writers.py` | Escreve `.txt`, `.srt`, `.vtt` e `.json`. |
 | `src/reuniao/components.py` | O que a página Componentes oferece. |
 | `src/reuniao/portable.py` | Modo portátil: tudo dentro da pasta do programa. |
+| `src/reuniao/cleanup.py` | Filtro de repetições e correção pelo glossário. |
+| `src/reuniao/cache.py` | Guarda o reconhecimento para não refazê-lo. |
+| `src/reuniao/review.py` | Lê uma transcrição de volta para a aba Revisar. |
 | `src/reuniao/gui/` | A janela. |
 | `build_reuniao.py` | Empacota com PyInstaller. |
 | `installer/reuniao.iss` | Instalador do Windows. |

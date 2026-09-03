@@ -43,7 +43,6 @@ EXCLUDED_QT_MODULES = (
     "PySide6.QtDataVisualization",
     "PySide6.QtDesigner",
     "PySide6.QtHelp",
-    "PySide6.QtMultimedia",
     "PySide6.QtMultimediaWidgets",
     "PySide6.QtNfc",
     "PySide6.QtOpenGL",
@@ -163,6 +162,11 @@ def build_command(args: argparse.Namespace, build_dir: Path) -> list[str]:
             "--collect-submodules=jp2subs.runtime",
             "--collect-submodules=jp2subs.gui",
             "--hidden-import=reuniao.gui.main",
+            # The Review page plays the recording alongside the transcript.
+            # The module alone is not enough: Qt loads its media backend as a
+            # plugin at runtime, so that has to travel with it.
+            "--hidden-import=PySide6.QtMultimedia",
+            "--collect-binaries=PySide6",
             "--hidden-import=jp2subs.config",
             "--hidden-import=rich",
             "--hidden-import=typer",

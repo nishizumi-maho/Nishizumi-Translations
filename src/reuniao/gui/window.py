@@ -8,11 +8,13 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .. import branding, components
 from ..config import load_settings, save_settings
 from .pages.componentes import ComponentsPage
+from .pages.revisar import ReviewPage
 from .pages.sobre import AboutPage
 from .pages.transcrever import TranscribePage
 
 NAV_ITEMS = (
     ("transcrever", "Transcrever", "waveform"),
+    ("revisar", "Revisar", "play"),
     ("componentes", "Componentes", "download"),
     ("sobre", "Sobre", "info"),
 )
@@ -67,10 +69,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.stack = QtWidgets.QStackedWidget()
         self.transcribe_page = TranscribePage()
+        self.review_page = ReviewPage()
         self.components_page = ComponentsPage()
         self.about_page = AboutPage()
         self._pages = {
             "transcrever": self.transcribe_page,
+            "revisar": self.review_page,
             "componentes": self.components_page,
             "sobre": self.about_page,
         }
@@ -135,6 +139,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _wire_pages(self) -> None:
         self.transcribe_page.navigate.connect(self.go_to)
+        self.transcribe_page.transcript_ready.connect(self.review_page.load_transcript)
         self.components_page.components_changed.connect(self._on_components_changed)
 
     # -- navigation -------------------------------------------------------
