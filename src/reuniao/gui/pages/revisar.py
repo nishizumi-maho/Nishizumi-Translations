@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jp2subs.gui.common import Card, label
+from jp2subs.gui.common import Card, Collapsible, label
 from PySide6 import QtCore, QtWidgets
 
 from ... import review as review_module
@@ -41,6 +41,8 @@ class ReviewPage(QtWidgets.QWidget):
         self._current_row = -1
         #: A seek asked for before the file finished loading, applied once it has.
         self._pending_seek: int | None = None
+        self._name_edits: list[QtWidgets.QLineEdit] = []
+        self._dirty = False
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(28, 24, 28, 20)
@@ -48,8 +50,10 @@ class ReviewPage(QtWidgets.QWidget):
 
         outer.addLayout(self._build_header())
         outer.addWidget(self._build_player_card())
+        outer.addWidget(self._build_speakers_card())
         outer.addWidget(self._build_search())
         outer.addWidget(self._build_list(), 1)
+        outer.addWidget(self._build_correction_bar())
 
         self._build_player()
         self._show_empty()
@@ -109,6 +113,46 @@ class ReviewPage(QtWidgets.QWidget):
         self.audio_note = label("", "Faint")
         card.body.addWidget(self.audio_note)
         return card
+
+    def _build_speakers_card(self) -> QtWidgets.QWidget:
+        """Names for the voices, editable, with how much each one talked."""
+
+        self.speakers_box = Collapsible("Interlocutores — dê o nome real de cada voz", expanded=True)
+        self.speakers_form = QtWidgets.QFormLayout()
+        self.speakers_form.setSpacing(6)
+        self.speakers_form.setFieldGrowthPolicy(QtWidgets.QFormLayout.AllNonFixedFieldsGrow)
+        self.speakers_box.body.addLayout(self.speakers_form)
+        self.speakers_hint = label(
+            "Clique numa fala para ouvir quem é, e escreva o nome aqui. Ele passa a "
+            "valer em todas as falas daquela voz.",
+            "Faint",
+        )
+        self.speakers_box.body.addWidget(self.speakers_hint)
+        return self.speakers_box
+
+    def _build_correction_bar(self) -> QtWidgets.QWidget:
+        holder = QtWidgets.QWidget()
+        row = QtWidgets.QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+
+        row.addWidget(label("Esta fala é de:", "Faint"), 0)
+        self.reassign_combo = QtWidgets.QComboBox()
+        self.reassign_combo.setMinimumWidth(220)
+        self.reassign_combo.activated.connect(self._reassign_selected)
+        row.addWidget(self.reassign_combo, 0)
+
+        row.addStretch(1)
+        self.save_btn = QtWidgets.QPushButton("Salvar correções")
+        self.save_btn.setObjectName("Primary")
+        self.save_btn.setToolTip(
+            "Regrava a transcrição com os nomes e as correções, por cima dos "
+            "arquivos que você abriu."
+        )
+        self.save_btn.clicked.connect(self._save_corrections)
+        row.addWidget(self.save_btn, 0)
+        self._correction_bar = holder
+        return holder
 
     def _build_search(self) -> QtWidgets.QWidget:
         holder = QtWidgets.QWidget()
@@ -183,19 +227,114 @@ class ReviewPage(QtWidgets.QWidget):
         self.search_edit.clear()
 
         for index, turn in enumerate(review.turns):
-            head = format_stamp(turn.start)
-            who = f" · {turn.speaker}" if turn.speaker else ""
-            doubt = "  [?]" if turn.uncertain else ""
-            item = QtWidgets.QListWidgetItem(f"{head}{who}{doubt}\n{turn.text}")
+            item = QtWidgets.QListWidgetItem(self._row_text(turn))
             item.setData(QtCore.Qt.UserRole, index)
             self.list.addItem(item)
 
+        self._dirty = False
+        self._rebuild_speaker_editors()
         count = len(review.turns)
         self.subtitle.setText(
             f"{review.title or 'Transcrição'} · {count} falas · clique em uma para ouvir aquele momento."
         )
         self._load_audio()
         self._filter(self.search_edit.text())
+
+    def _rebuild_speaker_editors(self) -> None:
+        """One name field per voice, ordered by how much each of them talked."""
+
+        while self.speakers_form.rowCount():
+            self.speakers_form.removeRow(0)
+        self._name_edits = []
+        self.reassign_combo.clear()
+
+        review = self.review
+        editable = bool(review and review.diarized and review.talk_time())
+        self.speakers_box.setVisible(bool(editable))
+        self._correction_bar.setVisible(bool(editable))
+        if not editable or review is None:
+            return
+
+        for index, name, seconds in review.talk_time():
+            edit = QtWidgets.QLineEdit(name)
+            edit.setPlaceholderText(f"Nome do interlocutor {index + 1}")
+            edit.editingFinished.connect(
+                lambda position=index, widget=edit: self._rename(position, widget.text())
+            )
+            self.speakers_form.addRow(f"{format_stamp(seconds)} de fala", edit)
+            self._name_edits.append(edit)
+            self.reassign_combo.addItem(name, index)
+        self.reassign_combo.addItem("Não identificado", None)
+        self.save_btn.setEnabled(bool(review.path))
+        if not review.path:
+            self.save_btn.setToolTip(
+                "Esta transcrição ainda não foi aberta de um arquivo. Use "
+                "“Abrir transcrição...” para poder regravar as correções."
+            )
+
+    def _rename(self, index: int, name: str) -> None:
+        if not self.review:
+            return
+        if self.review.name_for(index) == name.strip():
+            return
+        self.review.rename_speaker(index, name)
+        self._dirty = True
+        self._refresh_rows()
+        self._refresh_combo_names()
+
+    def _refresh_combo_names(self) -> None:
+        if not self.review:
+            return
+        for position in range(self.reassign_combo.count()):
+            index = self.reassign_combo.itemData(position)
+            if index is not None:
+                self.reassign_combo.setItemText(position, self.review.name_for(int(index)))
+
+    def _refresh_rows(self) -> None:
+        """Redraw the visible text of every line, keeping hidden state."""
+
+        if not self.review:
+            return
+        for row in range(self.list.count()):
+            item = self.list.item(row)
+            index = item.data(QtCore.Qt.UserRole)
+            if index is None:
+                continue
+            item.setText(self._row_text(self.review.turns[int(index)]))
+
+    def _reassign_selected(self, position: int) -> None:
+        item = self.list.currentItem()
+        if not item or not self.review:
+            return
+        index = item.data(QtCore.Qt.UserRole)
+        if index is None:
+            return
+        speaker = self.reassign_combo.itemData(position)
+        self.review.reassign(int(index), None if speaker is None else int(speaker))
+        self._dirty = True
+        self._refresh_rows()
+        self._rebuild_speaker_editors()
+
+    def _save_corrections(self) -> None:
+        if not self.review:
+            return
+        try:
+            written = review_module.save(self.review)
+        except (OSError, ValueError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Não deu para salvar", str(exc))
+            return
+        self._dirty = False
+        QtWidgets.QMessageBox.information(
+            self,
+            "Correções salvas",
+            "Regravado:\n" + "\n".join(item.name for item in written),
+        )
+
+    def _row_text(self, turn) -> str:
+        head = format_stamp(turn.start)
+        who = f" · {turn.speaker}" if turn.speaker else ""
+        doubt = "  [?]" if turn.uncertain else ""
+        return f"{head}{who}{doubt}\n{turn.text}"
 
     def _load_audio(self) -> None:
         if not self._player or not self.review:
@@ -243,6 +382,9 @@ class ReviewPage(QtWidgets.QWidget):
         turn = self.review.turns[int(index)]
         if not self._player or not self.review.has_audio:
             return
+        position = self.reassign_combo.findData(turn.speaker_index)
+        if position >= 0:
+            self.reassign_combo.setCurrentIndex(position)
         self._seek_ms(int(turn.start * 1000))
         self._player.play()
 

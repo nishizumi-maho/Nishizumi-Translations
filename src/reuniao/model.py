@@ -16,6 +16,9 @@ UNCERTAIN_BELOW = 0.6
 #: What a flagged turn is prefixed with in the text file.
 UNCERTAIN_MARK = "[?]"
 
+#: Marks a turn recorded while more than one person was talking.
+OVERLAP_MARK = "[><]"
+
 #: Shown where speakers were identified but this stretch matched no voice —
 #: crosstalk, or someone too far from the microphone.
 UNKNOWN_SPEAKER = "Não identificado"
@@ -68,6 +71,9 @@ class Utterance:
     #: How many words the confidence was averaged over, so merging two turns
     #: can weight them properly instead of averaging the averages.
     weight: int = 1
+    #: Someone else was talking at the same time. Both the words and the name
+    #: on them are least reliable here.
+    overlapped: bool = False
 
     @property
     def duration(self) -> float:
@@ -121,6 +127,10 @@ class Transcript:
     def uncertain_count(self) -> int:
         return sum(1 for item in self.utterances if item.uncertain)
 
+    @property
+    def overlapped_count(self) -> int:
+        return sum(1 for item in self.utterances if item.overlapped)
+
     def name_for(self, speaker: int | None) -> str:
         """Display name for a speaker number, falling back to a generic label."""
 
@@ -155,6 +165,7 @@ class Transcript:
                     "texto": item.text,
                     "confianca": round(item.confidence, 3),
                     "duvidoso": item.uncertain,
+                    "sobreposta": item.overlapped,
                 }
                 for item in self.utterances
             ],

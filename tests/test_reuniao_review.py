@@ -128,3 +128,75 @@ def test_the_page_survives_a_build_without_the_audio_module(tmp_path, monkeypatc
     assert page.list.count() == 3
     assert not page.play_btn.isEnabled()
     assert "não tem o componente de áudio" in page.audio_note.text()
+
+
+# -- correcting what the separation got wrong ------------------------------
+
+
+def test_renaming_a_voice_reaches_every_line_it_speaks():
+    result = review.from_transcript(_transcript())
+
+    result.rename_speaker(1, "Bruno")
+
+    assert [turn.speaker for turn in result.turns] == ["Ana", "Bruno", "Ana"]
+
+
+def test_an_empty_name_falls_back_to_the_generic_label():
+    result = review.from_transcript(_transcript())
+
+    result.rename_speaker(0, "   ")
+
+    assert result.turns[0].speaker == "Interlocutor 1"
+
+
+def test_a_line_can_be_moved_to_another_voice():
+    result = review.from_transcript(_transcript())
+
+    result.reassign(1, 0)
+
+    assert [turn.speaker for turn in result.turns] == ["Ana", "Ana", "Ana"]
+    assert result.turns[1].speaker_index == 0
+
+
+def test_talk_time_drives_the_order_of_the_editors():
+    result = review.from_transcript(_transcript())
+
+    rows = result.talk_time()
+
+    # Ana speaks twice, the other voice once.
+    assert rows[0][0] == 0
+    assert rows[0][2] > rows[1][2]
+
+
+def test_corrections_are_written_back_over_the_files_they_came_from(tmp_path):
+    from reuniao.writers import write_txt
+
+    transcript = _transcript()
+    json_path = tmp_path / "reuniao.json"
+    from reuniao.writers import write_json
+
+    write_json(transcript, json_path)
+    txt_path = write_txt(transcript, tmp_path / "reuniao.txt")
+
+    result = review.from_json(json_path)
+    result.rename_speaker(0, "Ana Beatriz")
+    result.rename_speaker(1, "Bruno")
+    result.reassign(1, 0)
+
+    written = review.save(result)
+
+    assert {item.name for item in written} == {"reuniao.json", "reuniao.txt"}
+    text = txt_path.read_text(encoding="utf-8-sig")
+    assert "Ana Beatriz" in text
+    assert "Bruno" not in text.split("─")[-1]  # every line moved to Ana Beatriz
+    # No new files were scattered around: the .srt never existed, so none appeared.
+    assert not (tmp_path / "reuniao.srt").exists()
+
+
+def test_a_transcript_never_saved_to_disk_refuses_to_be_written_back():
+    import pytest as _pytest
+
+    result = review.from_transcript(_transcript())
+
+    with _pytest.raises(ValueError):
+        review.save(result)

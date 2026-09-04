@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from . import languages
 from .branding import APP_ID
 
 #: Nudges Whisper towards written Brazilian Portuguese: accents, punctuation
@@ -23,6 +24,15 @@ DEFAULT_PROMPT = (
 
 #: How the .txt is laid out. Both keep the timings; they differ in shape.
 LAYOUTS = ("blocos", "linhas")
+
+#: Audio treatments, in the order the menu lists them.
+TREATMENTS: tuple[tuple[str, str], ...] = (
+    ("auto", "Automático (medir a gravação e decidir)"),
+    ("equalizar", "Sempre equalizar o volume"),
+    ("nivelar", "Equalizar e nivelar as vozes distantes"),
+    ("nenhum", "Não tratar o áudio"),
+)
+TREATMENT_CODES = tuple(code for code, _label in TREATMENTS)
 
 
 def config_dir() -> Path:
@@ -56,12 +66,19 @@ class Settings:
 
     #: Empty means "whichever installed model is best".
     model: str = ""
+    #: Whisper language code. Empty asks it to detect the language itself.
+    language: str = "pt"
     device: str = "auto"
     #: Eight rather than the usual five: the model weighs more hypotheses per
     #: stretch before committing. Costs roughly a third more time.
     beam_size: int = 8
     vad: bool = True
-    #: Even out the loudness before recognising, and cut the rumble.
+    #: How the audio is treated before recognition. "auto" measures the
+    #: recording and applies what the measurement calls for, which is what
+    #: anyone expects from a button that analyses the audio.
+    audio_treatment: str = "auto"
+    #: Resolved from ``audio_treatment``; kept so an explicit choice survives
+    #: a restart and so the cache can see what was actually applied.
     level_audio: bool = True
     #: Also even it out *within* the recording, for a room where people sit at
     #: very different distances from the microphone. Off by default: it lifts
@@ -71,7 +88,8 @@ class Settings:
     #: Restarts Whisper's context each window, which stops runaway repetition
     #: on long recordings at the cost of a little cross-sentence context.
     avoid_repetition: bool = True
-    initial_prompt: str = DEFAULT_PROMPT
+    #: Empty means "use the sentence that belongs to the chosen language".
+    initial_prompt: str = ""
     threads: int = 0
     compute_type: str = ""
 
@@ -90,6 +108,10 @@ class Settings:
     glossary: list[str] = field(default_factory=list)
     #: Flag turns the recogniser was unsure about with [?].
     mark_uncertain: bool = True
+    #: Flag turns spoken over somebody else, where attribution is least sure.
+    mark_overlap: bool = True
+    #: Sound and a taskbar nudge when a long run finishes.
+    notify_when_done: bool = True
     #: Collapse the phrase loops Whisper falls into on long recordings.
     filter_repetitions: bool = True
     #: Reuse a saved raw transcription instead of transcribing again.
@@ -127,6 +149,8 @@ class Settings:
 
         if self.layout not in LAYOUTS:
             self.layout = "blocos"
+        if self.audio_treatment not in TREATMENT_CODES:
+            self.audio_treatment = "auto"
         if self.device not in {"auto", "cuda", "cpu"}:
             self.device = "auto"
         self.beam_size = max(1, min(20, int(self.beam_size)))
@@ -136,6 +160,12 @@ class Settings:
         self.max_block = max(5.0, min(600.0, float(self.max_block)))
         self.speaker_names = [str(name).strip() for name in self.speaker_names if str(name).strip()]
         self.glossary = [str(term).strip() for term in self.glossary if str(term).strip()]
+        self.language = languages.normalize(self.language)
+        # A prompt that is simply one of the built-in sentences is not a
+        # customisation, and keeping it would pin an old language's wording
+        # onto a new language.
+        if self.initial_prompt.strip() in {item.prompt for item in languages.PRESETS if item.prompt}:
+            self.initial_prompt = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -162,6 +192,12 @@ def save_settings(settings: Settings, path: Path | None = None) -> Path:
         json.dumps(settings.to_dict(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
     return target
+
+
+def effective_prompt(settings: "Settings") -> str:
+    """The context sentence actually sent, custom or the language's own."""
+
+    return settings.initial_prompt.strip() or languages.prompt_for(settings.language)
 
 
 def parse_glossary(raw: str) -> list[str]:

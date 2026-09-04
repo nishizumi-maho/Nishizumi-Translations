@@ -86,6 +86,7 @@ def test_json_names_its_fields_in_portuguese(tmp_path):
         "texto": "Bom dia a todos, vamos começar.",
         "confianca": 1.0,
         "duvidoso": False,
+        "sobreposta": False,
     }
     assert data["interlocutores_identificados"] is True
     # Talk time is there for whatever reads the file next.

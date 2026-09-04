@@ -325,3 +325,64 @@ def renumber_speakers(turns: list[Utterance]) -> list[Utterance]:
         if item.speaker is not None:
             item.speaker = mapping[item.speaker]
     return turns
+
+
+def overlap_regions(spans: list[SpeakerSpan]) -> list[tuple[float, float]]:
+    """Stretches where more than one voice is active at once.
+
+    A sweep over the starts and ends, counting how many *distinct* voices are
+    open. Two spans of the same speaker touching is not crosstalk; two people
+    talking over each other is.
+    """
+
+    events: list[tuple[float, int, int]] = []
+    for span in spans:
+        events.append((span.start, 1, span.speaker))
+        events.append((span.end, -1, span.speaker))
+    events.sort(key=lambda item: (item[0], -item[1]))
+
+    active: dict[int, int] = {}
+    regions: list[tuple[float, float]] = []
+    opened: float | None = None
+
+    for moment, delta, speaker in events:
+        before = len(active)
+        active[speaker] = active.get(speaker, 0) + delta
+        if active[speaker] <= 0:
+            active.pop(speaker, None)
+        after = len(active)
+        if before < 2 <= after:
+            opened = moment
+        elif before >= 2 > after and opened is not None:
+            if moment > opened:
+                regions.append((opened, moment))
+            opened = None
+    return regions
+
+
+def mark_overlaps(
+    turns: list[Utterance], spans: list[SpeakerSpan], *, min_share: float = 0.2
+) -> int:
+    """Flag turns spoken while somebody else was talking. Returns how many.
+
+    Only a turn substantially inside crosstalk is flagged: a quarter-second
+    brush with the end of someone else's sentence is normal conversation, not
+    a passage to distrust.
+    """
+
+    regions = overlap_regions(spans)
+    if not regions:
+        return 0
+
+    flagged = 0
+    for turn in turns:
+        length = turn.end - turn.start
+        if length <= 0:
+            continue
+        covered = sum(
+            max(0.0, min(turn.end, end) - max(turn.start, start)) for start, end in regions
+        )
+        if covered / length >= min_share:
+            turn.overlapped = True
+            flagged += 1
+    return flagged

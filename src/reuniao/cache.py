@@ -45,6 +45,7 @@ def key_for(source: Path, settings) -> str:
             FORMAT,
             identity,
             settings.model,
+            settings.language,
             settings.beam_size,
             settings.vad,
             settings.avoid_repetition,
@@ -53,6 +54,7 @@ def key_for(source: Path, settings) -> str:
             # What the recogniser is fed matters as much as how it is asked.
             # Levelling changes the audio itself, and the quantisation changes
             # the arithmetic, so both change the transcription they produce.
+            settings.audio_treatment,
             settings.level_audio,
             settings.dynamic_level,
             settings.compute_type,

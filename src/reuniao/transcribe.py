@@ -6,6 +6,7 @@ fallback, which is what pulls a long recording out of a repetition loop.
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -41,6 +42,7 @@ def transcribe(
     audio_path: str | Path,
     *,
     model: str = "large-v3-turbo",
+    language: str = LANGUAGE,
     device: str = "auto",
     beam_size: int = 5,
     vad: bool = True,
@@ -70,7 +72,9 @@ def transcribe(
 
     segments_iter, info = engine.transcribe(
         str(audio_path),
-        language=LANGUAGE,
+        # Empty means "work it out": Whisper listens to the first half-minute
+        # and decides, which costs a little time and is occasionally wrong.
+        language=language or None,
         task="transcribe",
         beam_size=beam_size,
         vad_filter=vad,
@@ -86,6 +90,7 @@ def transcribe(
 
     segments: list[Segment] = []
     words_seen = 0
+    started = time.monotonic()
     for segment in segments_iter:
         if is_cancelled and is_cancelled():
             raise TranscriptionError("Transcrição cancelada.")
@@ -103,12 +108,18 @@ def transcribe(
                 confidence=_segment_confidence(segment, words),
             )
         )
+        detail = (
+            f"{format_clock(float(segment.end))} de {format_clock(total)} · "
+            f"{len(segments)} falas · {words_seen} palavras"
+        )
+        remaining = _remaining(float(segment.end), total, time.monotonic() - started)
+        if remaining:
+            detail += f" · faltam ~{remaining}"
         _emit(
             on_progress,
             (float(segment.end) / total) if total else 0.0,
             "Transcrevendo a reunião...",
-            f"{format_clock(float(segment.end))} de {format_clock(total)} · "
-            f"{len(segments)} falas · {words_seen} palavras",
+            detail,
         )
 
     _emit(on_progress, 1.0, "Transcrição concluída.", f"{len(segments)} falas")
@@ -143,6 +154,29 @@ def _segment_confidence(segment, words: list[Word]) -> float:
     if logprob is None:
         return 1.0
     return _clamp(1.0 + float(logprob))
+
+
+def _remaining(done_seconds: float, total_seconds: float, elapsed: float) -> str:
+    """How much longer this has to run, from the pace it has kept so far.
+
+    "62% done" does not answer the question anyone actually has in front of a
+    two-hour recording, which is whether there is time to go and do something
+    else.
+    """
+
+    if total_seconds <= 0 or done_seconds <= 0 or elapsed < 5:
+        return ""
+    pace = done_seconds / elapsed
+    if pace <= 0:
+        return ""
+    left = (total_seconds - done_seconds) / pace
+    if left < 30:
+        return "menos de 1 min"
+    minutes = int(left // 60)
+    if minutes < 60:
+        return f"{max(1, minutes)} min"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d} min"
 
 
 def _clamp(value) -> float:

@@ -10,7 +10,8 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
-from .model import UNCERTAIN_MARK, Transcript, Utterance
+from . import languages
+from .model import OVERLAP_MARK, UNCERTAIN_MARK, Transcript, Utterance
 from .progress import format_duration_pt, format_stamp
 
 #: Text files are written with a BOM: it is what makes Notepad and Excel on a
@@ -55,7 +56,7 @@ def _header(transcript: Transcript, mark_uncertain: bool = True, talk_time: bool
         f"Duração......: {format_duration_pt(transcript.duration)}",
         f"Gerada em....: {created}",
         f"Modelo.......: {transcript.model or 'desconhecido'} (Whisper)",
-        f"Idioma.......: português do Brasil",
+        f"Idioma.......: {languages.label_for(transcript.language)}",
     ]
     if transcript.diarized and transcript.speaker_names:
         names = ", ".join(transcript.speaker_names)
@@ -93,6 +94,22 @@ def _header(transcript: Transcript, mark_uncertain: bool = True, talk_time: bool
             )
         )
 
+    if transcript.overlapped_count:
+        count = transcript.overlapped_count
+        subject = (
+            f"A fala marcada com {OVERLAP_MARK} tem"
+            if count == 1
+            else f"As {count} falas marcadas com {OVERLAP_MARK} têm"
+        )
+        lines.append("")
+        lines.extend(
+            textwrap.wrap(
+                f"{subject} mais de uma pessoa falando ao mesmo tempo — é onde o texto "
+                "e o nome de quem falou erram mais.",
+                width=WRAP_COLUMNS,
+            )
+        )
+
     lines.append(RULE)
     return lines
 
@@ -104,6 +121,7 @@ def _blocks(transcript: Transcript, mark_uncertain: bool = True) -> list[str]:
     for item in transcript.utterances:
         speaker = transcript.name_for(item.speaker)
         doubt = f" {UNCERTAIN_MARK}" if mark_uncertain and item.uncertain else ""
+        doubt += f" {OVERLAP_MARK}" if item.overlapped else ""
         head = f"[{format_stamp(item.start)} {ARROW} {format_stamp(item.end)}]"
         out.append(f"{head}  {speaker}{doubt}" if speaker else f"{head}{doubt}")
         out.extend(textwrap.wrap(item.text, width=WRAP_COLUMNS) or [""])
@@ -118,6 +136,7 @@ def _lines(transcript: Transcript, mark_uncertain: bool = True) -> list[str]:
     for item in transcript.utterances:
         speaker = transcript.name_for(item.speaker)
         doubt = f"{UNCERTAIN_MARK} " if mark_uncertain and item.uncertain else ""
+        doubt += f"{OVERLAP_MARK} " if item.overlapped else ""
         head = f"[{format_stamp(item.start)} {ARROW} {format_stamp(item.end)}]"
         out.append(f"{head} {doubt}{speaker}: {item.text}" if speaker else f"{head} {doubt}{item.text}")
     return out

@@ -6,9 +6,10 @@ from pathlib import Path
 from jp2subs.gui.common import Banner, Card, Collapsible, FileQueue, ScrollPage, hline, label
 from PySide6 import QtCore, QtWidgets
 
-from ... import components
+from ... import components, languages
 from ...config import (
     DEFAULT_PROMPT,
+    TREATMENTS,
     Settings,
     load_settings,
     parse_glossary,
@@ -111,6 +112,19 @@ class TranscribePage(ScrollPage):
         self.model_combo.setMinimumWidth(300)
         self.model_combo.activated.connect(self._on_model_activated)
         form.addRow("Modelo", self.model_combo)
+
+        # Editable on purpose: the four presets cover almost everything, and
+        # anything else Whisper knows is one typed code away.
+        self.language_combo = QtWidgets.QComboBox()
+        self.language_combo.setEditable(True)
+        self.language_combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        for item in languages.PRESETS:
+            self.language_combo.addItem(item.label, item.code)
+        self.language_combo.setToolTip(
+            "A fala da reunião, não a interface. Dá para digitar qualquer código "
+            "do Whisper (ja, fr, de, it...). 'pt' cobre o português do Brasil."
+        )
+        form.addRow("Idioma da fala", self.language_combo)
 
         self.tracks_check = QtWidgets.QCheckBox("Cada arquivo é um participante (uma faixa por pessoa)")
         self.tracks_check.setToolTip(
@@ -228,22 +242,15 @@ class TranscribePage(ScrollPage):
         self.gap_spin.setToolTip("Pausa máxima para juntar duas falas seguidas da mesma pessoa.")
         form.addRow("Juntar falas até", self.gap_spin)
 
-        self.level_check = QtWidgets.QCheckBox("Equalizar o volume antes de transcrever")
-        self.level_check.setToolTip(
-            "Aproxima o volume de quem está longe do gravador e corta o ronco de "
-            "ar-condicionado e mesa. Recomendado para gravador único numa sala."
+        self.treatment_combo = QtWidgets.QComboBox()
+        for code, label in TREATMENTS:
+            self.treatment_combo.addItem(label, code)
+        self.treatment_combo.setToolTip(
+            "No automático, o aplicativo mede a gravação antes de transcrever e "
+            "aplica o que ela pedir: equalização sempre, e nivelamento das vozes "
+            "distantes só quando a medição mostrar que faz falta."
         )
-        form.addRow("Áudio", self.level_check)
-
-        self.dynamic_check = QtWidgets.QCheckBox(
-            "Nivelamento dinâmico (quem está longe do gravador)"
-        )
-        self.dynamic_check.setToolTip(
-            "Aproxima o volume das vozes distantes das próximas, trecho a trecho. "
-            "Use “Analisar o áudio” para saber se esta gravação precisa: ele também "
-            "levanta o ruído de fundo junto, e fundo alto alimenta alucinação."
-        )
-        form.addRow("", self.dynamic_check)
+        form.addRow("Tratamento do áudio", self.treatment_combo)
 
         self.uncertain_check = QtWidgets.QCheckBox("Marcar com [?] o que saiu duvidoso")
         form.addRow("Dúvidas", self.uncertain_check)
@@ -261,6 +268,7 @@ class TranscribePage(ScrollPage):
         self.prompt_edit = QtWidgets.QPlainTextEdit()
         self.prompt_edit.setMaximumHeight(70)
         self.prompt_edit.setPlaceholderText(DEFAULT_PROMPT)
+        self.language_combo.currentTextChanged.connect(self._sync_prompt_placeholder)
         self.prompt_edit.setToolTip(
             "Contexto dado ao Whisper. Inclua nomes próprios e siglas da empresa "
             "para ele acertar a grafia."
@@ -324,6 +332,11 @@ class TranscribePage(ScrollPage):
 
     def _load_settings_into_form(self) -> None:
         settings = self.settings
+        index = self.language_combo.findData(settings.language)
+        if index >= 0:
+            self.language_combo.setCurrentIndex(index)
+        else:
+            self.language_combo.setEditText(settings.language)
         self.tracks_check.setChecked(settings.tracks_are_speakers)
         self.speakers_check.setChecked(settings.identify_speakers)
         index = self.separation_combo.findData(settings.clustering_threshold)
@@ -342,8 +355,8 @@ class TranscribePage(ScrollPage):
         self.threads_spin.setValue(settings.threads)
         self.compute_combo.setCurrentIndex(max(0, self.compute_combo.findData(settings.compute_type)))
         self.gap_spin.setValue(settings.merge_gap)
-        self.level_check.setChecked(settings.level_audio)
-        self.dynamic_check.setChecked(settings.dynamic_level)
+        index = self.treatment_combo.findData(settings.audio_treatment)
+        self.treatment_combo.setCurrentIndex(index if index >= 0 else 0)
         self.uncertain_check.setChecked(settings.mark_uncertain)
         self.repetition_filter_check.setChecked(settings.filter_repetitions)
         self.reuse_check.setChecked(settings.reuse_transcription)
@@ -351,10 +364,12 @@ class TranscribePage(ScrollPage):
             self.prompt_edit.setPlainText(settings.initial_prompt)
         self._on_speakers_toggled(settings.identify_speakers)
         self._on_tracks_toggled(settings.tracks_are_speakers)
+        self._sync_prompt_placeholder()
 
     def _collect_settings(self) -> Settings:
         settings = self.settings
         settings.model = self.model_combo.currentData() or ""
+        settings.language = self._chosen_language()
         settings.tracks_are_speakers = self.tracks_check.isChecked()
         settings.identify_speakers = self.speakers_check.isChecked()
         settings.clustering_threshold = self.separation_combo.currentData() or DEFAULT_THRESHOLD
@@ -372,8 +387,7 @@ class TranscribePage(ScrollPage):
         settings.threads = self.threads_spin.value()
         settings.compute_type = self.compute_combo.currentData() or ""
         settings.merge_gap = self.gap_spin.value()
-        settings.level_audio = self.level_check.isChecked()
-        settings.dynamic_level = self.dynamic_check.isChecked()
+        settings.audio_treatment = self.treatment_combo.currentData() or "auto"
         settings.mark_uncertain = self.uncertain_check.isChecked()
         settings.filter_repetitions = self.repetition_filter_check.isChecked()
         settings.reuse_transcription = self.reuse_check.isChecked()
@@ -422,6 +436,21 @@ class TranscribePage(ScrollPage):
                 return
 
         self.banner.setVisible(False)
+
+    def _sync_prompt_placeholder(self, _text: str = "") -> None:
+        default = languages.prompt_for(self._chosen_language())
+        self.prompt_edit.setPlaceholderText(
+            default or "Contexto para o reconhecimento (opcional)"
+        )
+
+    def _chosen_language(self) -> str:
+        """The code behind the box, whether picked from the list or typed."""
+
+        typed = self.language_combo.currentText().strip()
+        index = self.language_combo.findText(typed)
+        if index >= 0:
+            return str(self.language_combo.itemData(index) or "")
+        return languages.normalize(typed)
 
     def _on_tracks_toggled(self, checked: bool) -> None:
         # With a track per person there is nothing left to tell apart.
@@ -492,17 +521,48 @@ class TranscribePage(ScrollPage):
 
     @QtCore.Slot(object, object)
     def _on_analysis(self, _found, advice) -> None:
+        """Show the measurements, and say plainly what they will and will not do.
+
+        Measuring changes nothing on its own, and a window full of numbers that
+        closes on OK reads as though something was applied. It has to say which
+        treatments are actually switched on for the next run.
+        """
+
         self._reset_analyse_button()
+        lines = list(advice.lines)
+        mode = self.treatment_combo.currentData() or "auto"
+        lines.append("")
+        lines.append("Medir não altera a gravação: o tratamento vai numa cópia,")
+        lines.append("na hora de transcrever.")
+        lines.append("")
+        if mode == "auto":
+            lines.append(
+                "Tratamento em AUTOMÁTICO: ao transcrever, o aplicativo repete esta"
+            )
+            lines.append("medição e aplica exatamente o que ela indicar acima.")
+        else:
+            lines.append(
+                f"Tratamento fixo em “{self.treatment_combo.currentText()}”, "
+                "independentemente desta medição."
+            )
+
         box = QtWidgets.QMessageBox(self)
         box.setWindowTitle("Análise da gravação")
         box.setIcon(QtWidgets.QMessageBox.Information)
-        box.setText("\n".join(advice.lines))
-        if advice.recommend_dynamic and not self.dynamic_check.isChecked():
-            box.setInformativeText("Quer ligar o nivelamento dinâmico agora?")
+        box.setText("\n".join(lines))
+
+        if advice.recommend_dynamic and mode not in {"auto", "nivelar"}:
+            box.setInformativeText(
+                "Esta gravação pede nivelamento das vozes distantes, mas o "
+                "tratamento está fixo e não vai aplicá-lo. Quer voltar para o "
+                "automático?"
+            )
             box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             box.setDefaultButton(QtWidgets.QMessageBox.Yes)
             if box.exec() == QtWidgets.QMessageBox.Yes:
-                self.dynamic_check.setChecked(True)
+                self.treatment_combo.setCurrentIndex(
+                    max(0, self.treatment_combo.findData("auto"))
+                )
             return
         box.exec()
 
@@ -647,6 +707,7 @@ class TranscribePage(ScrollPage):
 
     def _on_failed(self, message: str) -> None:
         self._worker = None
+        self._notify_done()
         self._append_log(f"Falhou: {message}")
         self.stage_label.setText("Falhou.")
         self._set_running(False)
@@ -656,10 +717,28 @@ class TranscribePage(ScrollPage):
             self._set_running(True)
             self._run_next()
 
+    def _notify_done(self) -> None:
+        """Sound and a taskbar nudge: a two-hour run is watched by nobody.
+
+        Deliberately not a modal: coming back to a dialog demanding a click
+        before the buttons work is worse than coming back to a finished job.
+        """
+
+        if not self.settings.notify_when_done:
+            return
+        app = QtWidgets.QApplication.instance()
+        if not app:
+            return
+        QtWidgets.QApplication.beep()
+        window = self.window()
+        if window:
+            app.alert(window, 3000)
+
     def _finish_all(self) -> None:
         self._set_running(False)
         if not self._results:
             return
+        self._notify_done()
         self.progress.setValue(100)
         self.stage_label.setText(
             "Transcrição concluída."

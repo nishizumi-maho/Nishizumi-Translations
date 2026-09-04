@@ -11,11 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from . import cache, cleanup, diarize, media, transcribe, writers
-from .config import Settings
+from . import analysis, cache, cleanup, diarize, media, transcribe, writers
+from .config import Settings, effective_prompt
 from .model import Transcript, assign_names
 from .progress import ProgressEvent, stage_percent
-from .speakers import build_utterances, consolidate_speakers, merge_runs
+from .speakers import build_utterances, consolidate_speakers, mark_overlaps, merge_runs
 
 
 class Cancelled(RuntimeError):
@@ -128,11 +128,12 @@ class Runner:
                 "",
             )
             duration = max(duration, media.probe_duration(source))
+            level, dynamic = self._decide_treatment(source, settings, notes)
             audio_path = media.prepare_audio(
                 source,
                 output_dir,
-                level=settings.level_audio,
-                dynamic=settings.dynamic_level,
+                level=level,
+                dynamic=dynamic,
                 register_subprocess=self._register,
             )
             try:
@@ -174,6 +175,7 @@ class Runner:
             cues=fine,
             speaker_names=names,
             model=model,
+            language=settings.language,
             diarized=True,
             notes=notes,
         )
@@ -194,11 +196,12 @@ class Runner:
         # -- prepare ------------------------------------------------------
         self._emit("Preparar", 0.0, "Preparando o áudio...", source.name)
         duration = media.probe_duration(source)
+        level, dynamic = self._decide_treatment(source, settings, notes)
         audio_path = media.prepare_audio(
             source,
             output_dir,
-            level=settings.level_audio,
-            dynamic=settings.dynamic_level,
+            level=level,
+            dynamic=dynamic,
             register_subprocess=self._register,
         )
         self._check()
@@ -247,7 +250,15 @@ class Runner:
                     note = f"{absorbed} falas soltas foram atribuídas a quem falava em volta."
                     notes.append(note)
                     self._log(note)
+            if diarized and settings.mark_overlap:
+                mark_overlaps(fine, spans)
             merged = merge_runs(fine, merge_gap=settings.merge_gap, max_block=settings.max_block)
+            if diarized and settings.mark_overlap:
+                crossed = mark_overlaps(merged, spans)
+                if crossed:
+                    note = f"{crossed} falas saíram com mais de uma pessoa falando ao mesmo tempo."
+                    notes.append(note)
+                    self._log(note)
 
             merged, collapsed, corrected = cleanup.tidy_utterances(
                 merged,
@@ -280,6 +291,7 @@ class Runner:
                 cues=fine,
                 speaker_names=assign_names(speaker_count, settings.speaker_names),
                 model=model,
+                language=settings.language,
                 diarized=diarized,
                 notes=notes,
             )
@@ -299,6 +311,47 @@ class Runner:
             return Result(transcript=transcript, files=files, output_dir=output_dir)
 
     # -- stages -----------------------------------------------------------
+
+    def _decide_treatment(self, source: Path, settings, notes: list[str]) -> tuple[bool, bool]:
+        """Work out what to do to the audio before the recogniser hears it.
+
+        In automatic mode the recording is measured first and the answer comes
+        from the measurement — which is the whole point of measuring. The extra
+        pass costs seconds against an hour of transcription.
+        """
+
+        mode = settings.audio_treatment
+        if mode == "nenhum":
+            return False, False
+        if mode == "equalizar":
+            return True, False
+        if mode == "nivelar":
+            return True, True
+
+        self._emit("Preparar", 0.1, "Medindo a gravação...", source.name)
+        try:
+            found = analysis.measure(source)
+        except Exception as exc:  # noqa: BLE001 - measuring is a nicety, not the job
+            self._log(f"Não deu para medir o áudio ({exc}); equalizando mesmo assim.")
+            return True, False
+
+        advice = analysis.advise(found)
+        detail = []
+        if found.loudness is not None:
+            detail.append(f"{found.loudness:.1f} LUFS")
+        if found.range_lu is not None:
+            detail.append(f"faixa {found.range_lu:.1f} LU")
+        applied = "equalização" if advice.recommend_level else "nenhum tratamento"
+        if advice.recommend_dynamic:
+            applied = "equalização e nivelamento das vozes distantes"
+        note = f"Áudio medido ({', '.join(detail)}): aplicado {applied}."
+        notes.append(note)
+        self._log(note)
+        if found.clipped:
+            clipped = "A gravação está estourada; parte do som não foi registrada."
+            notes.append(clipped)
+            self._log(clipped)
+        return advice.recommend_level, advice.recommend_dynamic
 
     def _transcribe(self, source: Path, audio_path: Path, model: str, settings, duration: float):
         """Recognise the speech, or reuse the recognition of an earlier run."""
@@ -322,7 +375,8 @@ class Runner:
             device=settings.device,
             beam_size=settings.beam_size,
             vad=settings.vad,
-            initial_prompt=settings.initial_prompt,
+            language=settings.language,
+            initial_prompt=effective_prompt(settings),
             hotwords=" ".join(settings.glossary),
             avoid_repetition=settings.avoid_repetition,
             threads=settings.threads,

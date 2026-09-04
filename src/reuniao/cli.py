@@ -30,6 +30,12 @@ def transcribe_command(
     arquivo: list[Path] = typer.Argument(..., help="Áudio ou vídeo da reunião."),
     saida: Path = typer.Option(None, "--saida", "-s", help="Pasta onde salvar. Padrão: ao lado do arquivo."),
     modelo: str = typer.Option("", "--modelo", "-m", help="Modelo Whisper. Padrão: o melhor instalado."),
+    idioma: str = typer.Option(
+        "",
+        "--idioma",
+        "-i",
+        help="Idioma da fala: pt, en, es, zh, qualquer código do Whisper, ou 'auto'. Padrão: o salvo.",
+    ),
     dispositivo: str = typer.Option("auto", "--dispositivo", "-d", help="auto, cuda ou cpu."),
     interlocutores: bool = typer.Option(
         True, "--interlocutores/--sem-interlocutores", help="Identificar quem falou cada trecho."
@@ -46,11 +52,10 @@ def transcribe_command(
         "--faixas",
         help="Os arquivos são faixas de UMA reunião, uma por participante, e não reuniões separadas.",
     ),
-    sem_equalizar: bool = typer.Option(False, "--sem-equalizar", help="Não emparelhar o volume antes de transcrever."),
-    nivelar: bool = typer.Option(
-        False,
-        "--nivelar",
-        help="Nivelamento dinâmico: aproxima quem está longe do gravador de quem está perto.",
+    audio: str = typer.Option(
+        "",
+        "--audio",
+        help="Tratamento do áudio: auto, equalizar, nivelar ou nenhum. Padrão: o salvo (auto).",
     ),
     sem_duvidas: bool = typer.Option(False, "--sem-duvidas", help="Não marcar com [?] os trechos de baixa confiança."),
     sem_reaproveitar: bool = typer.Option(False, "--sem-reaproveitar", help="Ignorar a transcrição guardada e refazer."),
@@ -72,6 +77,8 @@ def transcribe_command(
 
     settings = load_settings()
     settings.model = modelo or settings.model
+    if idioma:
+        settings.language = idioma
     settings.device = dispositivo
     settings.identify_speakers = interlocutores
     if separacao:
@@ -86,8 +93,8 @@ def transcribe_command(
     if glossario:
         settings.glossary = _read_glossary(glossario)
     settings.tracks_are_speakers = faixas
-    settings.level_audio = not sem_equalizar
-    settings.dynamic_level = nivelar
+    if audio:
+        settings.audio_treatment = audio
     settings.mark_uncertain = not sem_duvidas
     settings.reuse_transcription = not sem_reaproveitar
     if beam:
@@ -279,7 +286,12 @@ def ui_command() -> None:
 def version_command() -> None:
     """Mostra a versão."""
 
+    from . import languages
+
     console.print(f"{branding.APP_NAME} {branding.VERSION}")
+    console.print("Idiomas prontos: " + ", ".join(
+        f"{item.code or 'auto'} ({item.label})" for item in languages.PRESETS
+    ))
     console.print(branding.EXPERIMENTAL_NOTICE)
 
 
