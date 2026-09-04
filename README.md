@@ -6,19 +6,6 @@ Turn Japanese audio and video into transcripts and subtitle files. Drop a file i
 
 > The Python package and command line tool are still called `jp2subs`.
 
-## Experimental sibling: Nishizumi Reuniões
-
-An experimental build in this repository transcribes **meeting recordings in
-Brazilian Portuguese** into a plain text transcript — speech times, what was
-said, and who said it. It only transcribes: no translation, no subtitle
-burning, no editing.
-
-It downloads its own models and FFmpeg the same way this app does, and shares
-the same component folder, so nothing is downloaded twice.
-
-See **[docs/REUNIOES.md](docs/REUNIOES.md)** for how to install and use it. It
-is published as a hidden pre-release, separately from the releases below.
-
 ## Install
 
 ### Windows (recommended)
